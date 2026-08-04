@@ -13,9 +13,9 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from dashboard.utils.data import load_demand, load_engine, load_funnel
+from dashboard.utils.data import demand_source_path, load_demand, load_engine, load_funnel
 from dashboard.utils.ui import apply_theme
-from scripts.pipeline import RAW_DIR, REQUIRED_DEMAND_COLUMNS, resolve_demand_path
+from scripts.pipeline import RAW_DIR, REQUIRED_DEMAND_COLUMNS
 
 
 st.set_page_config(page_title="HCI | Data Quality", page_icon="✅", layout="wide")
@@ -24,7 +24,7 @@ apply_theme()
 
 @st.cache_data(show_spinner=False)
 def quality_profile() -> dict[str, object]:
-    demand_path = resolve_demand_path()
+    demand_path = demand_source_path()
     master_path = RAW_DIR / "Master_Hotel.xlsx"
 
     raw_demand = pd.read_csv(demand_path)
@@ -216,7 +216,7 @@ with left:
 with right:
     st.subheader("Source Freshness")
     source_files = [
-        ("Demand", resolve_demand_path()),
+        ("Demand", demand_source_path()),
         ("Hotel master", RAW_DIR / "Master_Hotel.xlsx"),
         ("Booking production", RAW_DIR / "Booking_Production.csv"),
         ("Internal parity", RAW_DIR / "internal price gap.csv"),

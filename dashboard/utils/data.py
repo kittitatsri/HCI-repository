@@ -3,10 +3,16 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
-from scripts.pipeline import resolve_demand_path
-
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+def demand_source_path() -> Path:
+    for filename in ("demand_latest.csv.gz", "demand_latest.csv"):
+        path = ROOT / "data" / "raw" / filename
+        if path.exists():
+            return path
+    raise FileNotFoundError("Missing demand_latest.csv.gz or demand_latest.csv")
 
 
 @st.cache_data(show_spinner=False)
@@ -16,7 +22,7 @@ def load_engine() -> pd.DataFrame:
 
 @st.cache_data(show_spinner=False)
 def load_demand() -> pd.DataFrame:
-    frame = pd.read_csv(resolve_demand_path())
+    frame = pd.read_csv(demand_source_path())
     frame["snapshot_at"] = pd.to_datetime(
         frame["Time Stamp"].astype(str).str.replace("\u202f", " ", regex=False), errors="coerce"
     )

@@ -16,7 +16,10 @@ if str(ROOT) not in sys.path:
 
 from dashboard.utils.data import clear_data_cache, load_engine, load_funnel
 from dashboard.utils.ui import apply_theme
-from scripts.pipeline import DEMAND_FILENAMES, RAW_DIR, REQUIRED_DEMAND_COLUMNS, run_pipeline
+from scripts.pipeline import RAW_DIR, REQUIRED_DEMAND_COLUMNS, run_pipeline
+
+
+DEMAND_FILENAMES = ("demand_latest.csv.gz", "demand_latest.csv")
 
 
 st.set_page_config(
