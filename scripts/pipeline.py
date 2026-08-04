@@ -27,6 +27,17 @@ REQUIRED_DEMAND_COLUMNS = {
 BOOKING_FILE = RAW_DIR / "Booking_Production.csv"
 INTERNAL_PARITY_FILE = RAW_DIR / "internal price gap.csv"
 AGODA_PARITY_FILE = RAW_DIR / "agoda price gap.xlsx"
+DEMAND_FILENAMES = ("demand_latest.csv.gz", "demand_latest.csv")
+
+
+def resolve_demand_path() -> Path:
+    for filename in DEMAND_FILENAMES:
+        path = RAW_DIR / filename
+        if path.exists():
+            return path
+    raise FileNotFoundError(
+        f"Missing demand source. Add {DEMAND_FILENAMES[0]} or {DEMAND_FILENAMES[1]} to {RAW_DIR}"
+    )
 
 
 def _safe_max_score(series: pd.Series) -> pd.Series:
@@ -48,12 +59,11 @@ def _normalise_status(series: pd.Series) -> pd.Series:
 
 def load_sources(demand_path: Path | None = None):
     if demand_path is None:
-        preferred = RAW_DIR / "demand_latest.csv"
-        if preferred.exists():
-            demand_path = preferred
-        else:
+        try:
+            demand_path = resolve_demand_path()
+        except FileNotFoundError:
             candidates = []
-            for path in RAW_DIR.glob("*.csv"):
+            for path in [*RAW_DIR.glob("*.csv"), *RAW_DIR.glob("*.csv.gz")]:
                 columns = set(pd.read_csv(path, nrows=0).columns)
                 if REQUIRED_DEMAND_COLUMNS.issubset(columns):
                     candidates.append(path)

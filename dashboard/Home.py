@@ -16,7 +16,7 @@ if str(ROOT) not in sys.path:
 
 from dashboard.utils.data import clear_data_cache, load_engine, load_funnel
 from dashboard.utils.ui import apply_theme
-from scripts.pipeline import RAW_DIR, REQUIRED_DEMAND_COLUMNS, run_pipeline
+from scripts.pipeline import DEMAND_FILENAMES, RAW_DIR, REQUIRED_DEMAND_COLUMNS, run_pipeline
 
 
 st.set_page_config(
@@ -81,7 +81,7 @@ with header_right:
 
 
 with st.expander("Update demand data", expanded=False):
-    upload = st.file_uploader("Upload the latest demand CSV", type="csv")
+    upload = st.file_uploader("Upload the latest demand CSV or CSV.GZ", type=["csv", "gz"])
     if upload is not None:
         preview = pd.read_csv(upload)
         upload.seek(0)
@@ -89,8 +89,11 @@ with st.expander("Update demand data", expanded=False):
         if missing:
             st.error("Missing columns: " + ", ".join(sorted(missing)))
         elif st.button("Process and refresh", type="primary"):
-            destination = RAW_DIR / "demand_latest.csv"
+            compressed = upload.name.lower().endswith(".csv.gz")
+            destination = RAW_DIR / (DEMAND_FILENAMES[0] if compressed else DEMAND_FILENAMES[1])
+            alternative = RAW_DIR / (DEMAND_FILENAMES[1] if compressed else DEMAND_FILENAMES[0])
             destination.write_bytes(upload.getvalue())
+            alternative.unlink(missing_ok=True)
             with st.spinner("Refreshing daily hotel demand…"):
                 run_pipeline(destination)
             clear_data_cache()

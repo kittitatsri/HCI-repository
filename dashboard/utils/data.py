@@ -3,6 +3,8 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
+from scripts.pipeline import resolve_demand_path
+
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -14,7 +16,7 @@ def load_engine() -> pd.DataFrame:
 
 @st.cache_data(show_spinner=False)
 def load_demand() -> pd.DataFrame:
-    frame = pd.read_csv(ROOT / "data" / "raw" / "demand_latest.csv")
+    frame = pd.read_csv(resolve_demand_path())
     frame["snapshot_at"] = pd.to_datetime(
         frame["Time Stamp"].astype(str).str.replace("\u202f", " ", regex=False), errors="coerce"
     )
