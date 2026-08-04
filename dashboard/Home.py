@@ -86,23 +86,28 @@ with header_right:
 with st.expander("Update demand data", expanded=False):
     upload = st.file_uploader("Upload the latest demand CSV or CSV.GZ", type=["csv", "gz"])
     if upload is not None:
-        preview = pd.read_csv(upload)
-        upload.seek(0)
-        missing = REQUIRED_DEMAND_COLUMNS.difference(preview.columns)
-        if missing:
-            st.error("Missing columns: " + ", ".join(sorted(missing)))
-        elif st.button("Process and refresh", type="primary"):
-            compressed = upload.name.lower().endswith(".csv.gz")
-            destination = RAW_DIR / (DEMAND_FILENAMES[0] if compressed else DEMAND_FILENAMES[1])
-            alternative = RAW_DIR / (DEMAND_FILENAMES[1] if compressed else DEMAND_FILENAMES[0])
-            destination.write_bytes(upload.getvalue())
-            alternative.unlink(missing_ok=True)
-            with st.spinner("Refreshing daily hotel demand…"):
-                run_pipeline(destination)
-            clear_data_cache()
-            prepare_home_data.clear()
-            st.success(f"Updated from {len(preview):,} demand rows.")
-            st.rerun()
+        compressed = upload.name.lower().endswith(".csv.gz")
+        try:
+            preview = pd.read_csv(upload, compression="gzip" if compressed else None)
+        except (UnicodeDecodeError, OSError) as exc:
+            st.error("This file could not be read. Upload a valid CSV or GZIP-compressed CSV (.csv.gz).")
+            st.caption(str(exc))
+        else:
+            upload.seek(0)
+            missing = REQUIRED_DEMAND_COLUMNS.difference(preview.columns)
+            if missing:
+                st.error("Missing columns: " + ", ".join(sorted(missing)))
+            elif st.button("Process and refresh", type="primary"):
+                destination = RAW_DIR / (DEMAND_FILENAMES[0] if compressed else DEMAND_FILENAMES[1])
+                alternative = RAW_DIR / (DEMAND_FILENAMES[1] if compressed else DEMAND_FILENAMES[0])
+                destination.write_bytes(upload.getvalue())
+                alternative.unlink(missing_ok=True)
+                with st.spinner("Refreshing daily hotel demand…"):
+                    run_pipeline(destination)
+                clear_data_cache()
+                prepare_home_data.clear()
+                st.success(f"Updated from {len(preview):,} demand rows.")
+                st.rerun()
 
 
 available_dates = daily["checkin_date"].dt.date.tolist()
