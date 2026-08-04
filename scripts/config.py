@@ -1,0 +1,7 @@
+# Commercial Strategy Configuration
+
+DEMAND_WEIGHT = 0.40
+REVENUE_WEIGHT = 0.25
+RN_WEIGHT = 0.15
+TREND_WEIGHT = 0.10
+MAPPING_WEIGHT = 0.10

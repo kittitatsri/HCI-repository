@@ -1,0 +1,24 @@
+# Local Python environment
+.venv/
+venv/
+
+# Python caches and test artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+
+# macOS and editor files
+.DS_Store
+.idea/
+.vscode/
+
+# Streamlit secrets must never be committed
+.streamlit/secrets.toml
+
+# Generated operational exports and logs
+output/
+*.log
+
+# Historical demand archive not used by the deployed app
+data/raw/21 june.csv
