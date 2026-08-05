@@ -28,6 +28,7 @@ BOOKING_FILE = RAW_DIR / "Booking_Production.csv"
 INTERNAL_PARITY_FILE = RAW_DIR / "internal price gap.csv"
 AGODA_PARITY_FILE = RAW_DIR / "agoda price gap.xlsx"
 DEMAND_FILENAMES = ("demand_latest.csv.gz", "demand_latest.csv")
+PREVIOUS_DEMAND_FILENAMES = ("demand_previous.csv.gz", "demand_previous.csv")
 
 
 def resolve_demand_path() -> Path:
@@ -38,6 +39,14 @@ def resolve_demand_path() -> Path:
     raise FileNotFoundError(
         f"Missing demand source. Add {DEMAND_FILENAMES[0]} or {DEMAND_FILENAMES[1]} to {RAW_DIR}"
     )
+
+
+def resolve_previous_demand_path() -> Path | None:
+    for filename in PREVIOUS_DEMAND_FILENAMES:
+        path = RAW_DIR / filename
+        if path.exists():
+            return path
+    return None
 
 
 def _safe_max_score(series: pd.Series) -> pd.Series:
@@ -190,9 +199,13 @@ def load_agoda_parity() -> pd.DataFrame:
     return long
 
 
-def build_hotel_date_funnel(demand: pd.DataFrame) -> pd.DataFrame:
+def build_hotel_date_funnel(
+    demand: pd.DataFrame, previous_demand: pd.DataFrame | None = None
+) -> pd.DataFrame:
     latest = build_latest_demand_by_checkin(demand)
     latest["checkin_date"] = latest["checkin_date"].dt.normalize()
+    latest["search_volume"] = pd.to_numeric(latest["search_volume"], errors="coerce").fillna(0)
+    latest["view_volume"] = pd.to_numeric(latest["view_volume"], errors="coerce").fillna(0)
     funnel = latest.merge(
         load_booking_production(),
         on=["ProductID", "checkin_date"],
@@ -227,6 +240,40 @@ def build_hotel_date_funnel(demand: pd.DataFrame) -> pd.DataFrame:
         funnel["Internal_Comparable_Rates"] / funnel["Internal_Total_Rates"],
         np.nan,
     )
+    if previous_demand is not None and not previous_demand.empty:
+        previous = build_latest_demand_by_checkin(previous_demand)[
+            ["ProductID", "checkin_date", "search_volume", "view_volume"]
+        ].rename(
+            columns={
+                "search_volume": "Previous_Searches",
+                "view_volume": "Previous_Views",
+            }
+        )
+        previous["checkin_date"] = previous["checkin_date"].dt.normalize()
+        funnel = funnel.merge(
+            previous,
+            on=["ProductID", "checkin_date"],
+            how="left",
+            validate="one_to_one",
+        )
+        new_vs_previous = funnel["Previous_Searches"].isna()
+        funnel["Search_Change"] = funnel["search_volume"] - funnel["Previous_Searches"].fillna(0)
+        funnel["View_Change"] = funnel["view_volume"] - funnel["Previous_Views"].fillna(0)
+        funnel["Upload_Change_Status"] = np.select(
+            [
+                new_vs_previous,
+                funnel["Search_Change"].gt(0),
+                funnel["Search_Change"].lt(0),
+            ],
+            ["New", "Up", "Down"],
+            default="No change",
+        )
+    else:
+        funnel["Previous_Searches"] = np.nan
+        funnel["Previous_Views"] = np.nan
+        funnel["Search_Change"] = np.nan
+        funnel["View_Change"] = np.nan
+        funnel["Upload_Change_Status"] = "No baseline"
     return funnel
 
 
@@ -453,8 +500,12 @@ def export_outputs(engine: pd.DataFrame, summary: pd.DataFrame, funnel: pd.DataF
 def run_pipeline(demand_path: Path | None = None):
     demand, master, performance, source = load_sources(demand_path)
     demand = prepare_demand(demand)
+    previous_path = resolve_previous_demand_path()
+    previous_demand = (
+        prepare_demand(pd.read_csv(previous_path)) if previous_path is not None else None
+    )
     summary = build_demand_summary(demand)
-    funnel = build_hotel_date_funnel(demand)
+    funnel = build_hotel_date_funnel(demand, previous_demand)
     engine = build_engine(summary, master, performance, funnel)
     export_outputs(engine, summary, funnel)
     return engine, demand, source

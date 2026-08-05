@@ -217,6 +217,7 @@ with right:
     st.subheader("Source Freshness")
     source_files = [
         ("Demand", demand_source_path()),
+        ("Previous demand", RAW_DIR / "demand_previous.csv.gz"),
         ("Hotel master", RAW_DIR / "Master_Hotel.xlsx"),
         ("Booking production", RAW_DIR / "Booking_Production.csv"),
         ("Internal parity", RAW_DIR / "internal price gap.csv"),

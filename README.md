@@ -46,6 +46,7 @@ From this folder:
 The pipeline reads these source files from `data/raw/`:
 
 - `demand_latest.csv.gz` (recommended for large files) or `demand_latest.csv`
+- `demand_previous.csv.gz` (retained baseline for previous-versus-latest comparison)
 - `Booking_Production.csv`
 - `Hotel_Performance.xlsx`
 - `Master_Hotel.xlsx`

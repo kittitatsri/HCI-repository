@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date
 from pathlib import Path
+import shutil
 import sys
 
 import altair as alt
@@ -14,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from dashboard.utils.data import clear_data_cache, load_engine, load_funnel
+from dashboard.utils.data import clear_data_cache, demand_source_path, load_engine, load_funnel
 from dashboard.utils.ui import apply_theme
 from scripts.pipeline import RAW_DIR, REQUIRED_DEMAND_COLUMNS, run_pipeline
 
@@ -98,6 +99,14 @@ with st.expander("Update demand data", expanded=False):
             if missing:
                 st.error("Missing columns: " + ", ".join(sorted(missing)))
             elif st.button("Process and refresh", type="primary"):
+                current_source = demand_source_path()
+                previous_suffix = ".csv.gz" if current_source.name.endswith(".csv.gz") else ".csv"
+                previous_destination = RAW_DIR / f"demand_previous{previous_suffix}"
+                previous_alternative = RAW_DIR / (
+                    "demand_previous.csv" if previous_suffix == ".csv.gz" else "demand_previous.csv.gz"
+                )
+                shutil.copy2(current_source, previous_destination)
+                previous_alternative.unlink(missing_ok=True)
                 destination = RAW_DIR / (DEMAND_FILENAMES[0] if compressed else DEMAND_FILENAMES[1])
                 alternative = RAW_DIR / (DEMAND_FILENAMES[1] if compressed else DEMAND_FILENAMES[0])
                 destination.write_bytes(upload.getvalue())

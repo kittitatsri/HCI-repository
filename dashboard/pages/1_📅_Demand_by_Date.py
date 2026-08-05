@@ -149,9 +149,12 @@ if destinations:
 
 selected_ts = pd.Timestamp(selected_date)
 selected = filtered_detail[filtered_detail["checkin_date"].eq(selected_ts)].copy()
-movement = latest_increase(demand, selected_ts)
-selected = selected.merge(movement, on="ProductID", how="left", validate="one_to_one")
-selected[["Search Increase", "View Increase"]] = selected[["Search Increase", "View Increase"]].fillna(0)
+if "Search_Change" not in selected:
+    selected["Search_Change"] = np.nan
+if "View_Change" not in selected:
+    selected["View_Change"] = np.nan
+if "Upload_Change_Status" not in selected:
+    selected["Upload_Change_Status"] = "No baseline"
 
 filtered_daily = (
     filtered_detail.groupby("checkin_date", as_index=False)
@@ -173,14 +176,18 @@ date_level = (
 
 total_searches = float(selected["search_volume"].sum())
 total_views = float(selected["view_volume"].sum())
-total_increase = float(selected["Search Increase"].sum())
+total_change = float(selected["Search_Change"].sum(min_count=1)) if selected["Search_Change"].notna().any() else np.nan
 active_hotels = int(selected["ProductID"].nunique())
 
 k1, k2, k3, k4, k5 = st.columns(5)
 k1.metric("Portfolio demand", date_level, help="Selected date compared with other check-in dates")
 k2.metric("Searches", f"{total_searches:,.0f}")
 k3.metric("Views", f"{total_views:,.0f}")
-k4.metric("Latest search increase", f"+{total_increase:,.0f}", help="Observed positive increase in the latest snapshot")
+k4.metric(
+    "Search change vs previous upload",
+    "No baseline" if pd.isna(total_change) else f"{total_change:+,.0f}",
+    help="Latest uploaded demand minus the previous uploaded demand for the selected check-in date",
+)
 k5.metric("Hotels with demand", f"{active_hotels:,}")
 
 chart_col, destination_col = st.columns([2.05, 1])
@@ -246,15 +253,15 @@ st.caption(
 level_order = {"Very High": 4, "High": 3, "Medium": 2, "Low": 1}
 selected["Level Order"] = selected["Demand Level"].map(level_order).fillna(0)
 selected = selected.sort_values(
-    ["Level Order", "search_volume", "Search Increase", "view_volume"],
+    ["Level Order", "search_volume", "Search_Change", "view_volume"],
     ascending=[False, False, False, False],
 ).reset_index(drop=True)
 selected["Priority"] = np.arange(1, len(selected) + 1)
 selected["Why prioritized"] = np.select(
     [
-        selected["Demand Level"].eq("Very High") & selected["Search Increase"].gt(0),
+        selected["Demand Level"].eq("Very High") & selected["Search_Change"].gt(0),
         selected["Demand Level"].eq("Very High"),
-        selected["Demand Level"].eq("High") & selected["Search Increase"].gt(0),
+        selected["Demand Level"].eq("High") & selected["Search_Change"].gt(0),
         selected["Demand Level"].eq("High"),
     ],
     ["Very high and rising", "Very high demand", "High and rising", "High demand"],
@@ -295,6 +302,9 @@ display = selected.rename(
         "HotelType Short": "Hotel Type",
         "search_volume": "Searches",
         "view_volume": "Views",
+        "Previous_Searches": "Previous Searches",
+        "Search_Change": "Search Change",
+        "Upload_Change_Status": "Change",
     }
 )
 display_columns = [
@@ -306,7 +316,9 @@ display_columns = [
     "Demand Level",
     "Searches",
     "Views",
-    "Search Increase",
+    "Previous Searches",
+    "Search Change",
+    "Change",
     "Why prioritized",
     "Agoda Mapping",
     "Ctrip Mapping",
@@ -321,7 +333,8 @@ st.dataframe(
         "Priority": st.column_config.NumberColumn(format="%d", width="small"),
         "Searches": st.column_config.NumberColumn(format="localized"),
         "Views": st.column_config.NumberColumn(format="localized"),
-        "Search Increase": st.column_config.NumberColumn(format="localized"),
+        "Previous Searches": st.column_config.NumberColumn(format="localized"),
+        "Search Change": st.column_config.NumberColumn(format="localized"),
         "Agoda Mapping": st.column_config.TextColumn(width="medium"),
         "Ctrip Mapping": st.column_config.TextColumn(width="medium"),
         "Next step": st.column_config.TextColumn(width="medium"),
