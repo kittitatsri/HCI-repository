@@ -14,7 +14,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from dashboard.utils.data import demand_source_path, load_demand, load_engine, load_funnel
-from dashboard.utils.ui import apply_theme
+from dashboard.utils.ui import apply_theme, style_table
 from scripts.pipeline import RAW_DIR, REQUIRED_DEMAND_COLUMNS
 
 
@@ -201,7 +201,7 @@ left, right = st.columns([1.75, 1])
 with left:
     st.subheader("Quality Checks")
     st.dataframe(
-        checks,
+        style_table(checks),
         hide_index=True,
         width="stretch",
         height=390,
@@ -233,7 +233,7 @@ with right:
                 "Status": "Available" if stamp is not None else "Missing",
             }
         )
-    st.dataframe(pd.DataFrame(freshness_rows), hide_index=True, width="stretch", height=250)
+    st.dataframe(style_table(pd.DataFrame(freshness_rows)), hide_index=True, width="stretch", height=250)
     st.caption("File modified time confirms the local file version, not when the upstream source generated it.")
 
 coverage = (

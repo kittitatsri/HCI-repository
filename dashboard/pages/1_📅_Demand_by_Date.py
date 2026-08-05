@@ -15,7 +15,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from dashboard.utils.data import load_engine, load_funnel
-from dashboard.utils.ui import apply_theme
+from dashboard.utils.ui import apply_theme, style_table
 
 
 st.set_page_config(page_title="HCI | Demand by Date", page_icon="📅", layout="wide")
@@ -286,7 +286,7 @@ with destination_col:
         .head(8)
     )
     st.dataframe(
-        destination_rank,
+        style_table(destination_rank),
         hide_index=True,
         width="stretch",
         height=354,
@@ -308,9 +308,9 @@ daily_display = filtered_daily.rename(
 )
 daily_display["Change %"] = daily_display["Change %"] * 100
 st.dataframe(
-    daily_display[
+    style_table(daily_display[
         ["Check-in Date", "Signal", "Latest Searches", "Change %", "Hotels Rising", "Action Hotels"]
-    ],
+    ]),
     hide_index=True,
     width="stretch",
     height=320,
@@ -371,7 +371,7 @@ display_columns = [
 ]
 display["Change %"] = display["Change %"] * 100
 st.dataframe(
-    display[display_columns].head(200),
+    style_table(display[display_columns].head(200)),
     hide_index=True,
     width="stretch",
     height=530,

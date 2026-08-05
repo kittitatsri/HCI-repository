@@ -16,7 +16,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from dashboard.utils.data import clear_data_cache, demand_source_path, load_engine, load_funnel
-from dashboard.utils.ui import apply_theme
+from dashboard.utils.ui import apply_theme, style_table
 from scripts.pipeline import RAW_DIR, REQUIRED_DEMAND_COLUMNS, run_pipeline
 
 
@@ -295,9 +295,9 @@ if not hotel_table.empty:
         columns={"ProductName": "Hotel", "search_volume": "Searches", "view_volume": "Views"}
     )
     st.dataframe(
-        hotel_table[
+        style_table(hotel_table[
             ["Priority", "Hotel", "Destination", "Demand Level", "Searches", "Views", "Why prioritized", "Next step"]
-        ],
+        ]),
         hide_index=True,
         width="stretch",
         height=455,

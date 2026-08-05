@@ -16,7 +16,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from dashboard.utils.data import load_engine, load_funnel
-from dashboard.utils.ui import apply_theme
+from dashboard.utils.ui import apply_theme, style_table
 
 
 st.set_page_config(page_title="HCI | Hotel Explorer", page_icon="🏨", layout="wide")
@@ -387,9 +387,9 @@ with demand_tab:
     )
     demand_display["Change %"] = demand_display["Change %"] * 100
     st.dataframe(
-        demand_display[
+        style_table(demand_display[
             ["Check-in Date", "Demand Level", "Latest Searches", "Change %", "Signal"]
-        ],
+        ]),
         hide_index=True,
         width="stretch",
         height=330,
@@ -460,7 +460,7 @@ with parity_tab:
         | parity_history["Agoda_Price_Disadvantage"].notna()
     ]
     with st.expander("View parity history", expanded=False):
-        st.dataframe(parity_history, hide_index=True, width="stretch")
+        st.dataframe(style_table(parity_history), hide_index=True, width="stretch")
 
     parity_tool_url = os.getenv("PARITY_TOOL_URL", "").strip()
     if parity_tool_url:

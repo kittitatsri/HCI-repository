@@ -1,3 +1,6 @@
+from __future__ import annotations
+
+import pandas as pd
 import streamlit as st
 
 
@@ -70,3 +73,69 @@ def apply_theme() -> None:
 def status_label(value: str) -> str:
     icons = {"Mapped": "🟢", "No Room": "🟠", "Not Live": "🟡", "Not Mapped": "🔴", "Unknown": "⚪"}
     return f"{icons.get(str(value), '⚪')} {value}"
+
+
+def style_table(frame: pd.DataFrame) -> pd.io.formats.style.Styler:
+    """Apply HCI's shared, restrained status colors to a dataframe."""
+
+    def semantic_color(value: object) -> str:
+        if pd.isna(value):
+            return ""
+        label = str(value).strip().lower()
+        colors = {
+            "critical surge": ("#fee2e2", "#b91c1c"),
+            "very high": ("#fee2e2", "#b91c1c"),
+            "failed": ("#fee2e2", "#b91c1c"),
+            "not mapped": ("#fee2e2", "#b91c1c"),
+            "high increase": ("#ffedd5", "#c2410c"),
+            "high": ("#ffedd5", "#c2410c"),
+            "warning": ("#ffedd5", "#c2410c"),
+            "no room": ("#ffedd5", "#c2410c"),
+            "new demand": ("#dbeafe", "#1d4ed8"),
+            "medium": ("#dbeafe", "#1d4ed8"),
+            "stable": ("#dcfce7", "#15803d"),
+            "low": ("#dcfce7", "#15803d"),
+            "passed": ("#dcfce7", "#15803d"),
+            "mapped": ("#dcfce7", "#15803d"),
+            "available": ("#dcfce7", "#15803d"),
+            "declining": ("#f1f5f9", "#64748b"),
+            "no baseline": ("#f1f5f9", "#64748b"),
+            "missing": ("#f1f5f9", "#64748b"),
+            "unknown": ("#f1f5f9", "#64748b"),
+            "not live": ("#fef9c3", "#854d0e"),
+        }.get(label)
+        if colors is None:
+            if label.startswith("check inventory") or label.startswith("validate demand"):
+                colors = ("#ffedd5", "#c2410c")
+            elif label in {"monitor", "none"}:
+                colors = ("#dcfce7", "#15803d")
+            elif label == "lower priority":
+                colors = ("#f1f5f9", "#64748b")
+        if colors is None:
+            return ""
+        background, foreground = colors
+        return f"background-color:{background};color:{foreground};font-weight:650"
+
+    def change_color(value: object) -> str:
+        number = pd.to_numeric(value, errors="coerce")
+        if pd.isna(number):
+            return "color:#94a3b8"
+        if number >= 25:
+            return "background-color:#fee2e2;color:#b91c1c;font-weight:700"
+        if number >= 10:
+            return "background-color:#ffedd5;color:#c2410c;font-weight:700"
+        if number <= -10:
+            return "background-color:#f1f5f9;color:#64748b;font-weight:650"
+        return "background-color:#dcfce7;color:#15803d;font-weight:650"
+
+    styler = frame.style
+    semantic_columns = [
+        column
+        for column in frame.columns
+        if column in {"Signal", "Demand Level", "Status", "Agoda Status", "Ctrip Status", "Next step", "Next Action"}
+    ]
+    if semantic_columns:
+        styler = styler.map(semantic_color, subset=semantic_columns)
+    for column in [name for name in frame.columns if "Change %" in str(name)]:
+        styler = styler.map(change_color, subset=[column])
+    return styler
