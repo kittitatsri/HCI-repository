@@ -24,7 +24,14 @@ def apply_theme() -> None:
         .freshness {padding-top:2.15rem; text-align:right; color:var(--muted); font-size:.85rem;}
         [data-testid="stMetric"] {background:#fff; border:1px solid var(--line); padding:17px 18px; border-radius:13px; box-shadow:0 2px 8px rgba(15,23,42,.035); min-height:112px;}
         [data-testid="stMetricLabel"] {color:var(--muted); font-weight:600;}
-        [data-testid="stMetricValue"] {color:var(--ink); font-weight:750;}
+        [data-testid="stMetricValue"], [data-testid="stMetricValue"] > div {
+            color:var(--ink); font-weight:750; font-size:2rem !important; line-height:1.12;
+            white-space:normal !important; overflow:visible !important; text-overflow:clip !important;
+        }
+        [data-testid="stMetricValue"] p {
+            font-size:1.65rem !important; line-height:1.08 !important; white-space:normal !important;
+            overflow:visible !important; text-overflow:clip !important; overflow-wrap:anywhere;
+        }
         [data-testid="stDataFrame"] {border:1px solid var(--line); border-radius:12px; overflow:hidden; background:#fff;}
         [data-testid="stVegaLiteChart"] {background:#fff; border:1px solid var(--line); padding:12px 14px; border-radius:13px;}
         [data-testid="stAlert"] * {color:#334155 !important;}
