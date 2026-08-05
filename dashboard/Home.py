@@ -40,6 +40,10 @@ def prepare_home_data(engine: pd.DataFrame, funnel: pd.DataFrame) -> tuple[pd.Da
     detail["checkin_date"] = pd.to_datetime(detail["checkin_date"], errors="coerce").dt.normalize()
     detail["search_volume"] = pd.to_numeric(detail["search_volume"], errors="coerce").fillna(0)
     detail["view_volume"] = pd.to_numeric(detail["view_volume"], errors="coerce").fillna(0)
+    for column in ["Previous_Searches", "Search_Change"]:
+        if column not in detail:
+            detail[column] = np.nan
+        detail[column] = pd.to_numeric(detail[column], errors="coerce")
     detail = detail.dropna(subset=["checkin_date"])
 
     daily = (
@@ -154,18 +158,68 @@ selected_daily = (
 )
 selected_row = selected_daily[selected_daily["checkin_date"].eq(selected_ts)]
 selected_searches = float(selected_detail["search_volume"].sum())
-selected_views = float(selected_detail["view_volume"].sum())
+previous_searches = (
+    float(selected_detail["Previous_Searches"].sum(min_count=1))
+    if selected_detail["Previous_Searches"].notna().any()
+    else np.nan
+)
+search_change = (
+    float(selected_detail["Search_Change"].sum(min_count=1))
+    if selected_detail["Search_Change"].notna().any()
+    else np.nan
+)
+change_pct = search_change / previous_searches if previous_searches and pd.notna(search_change) else np.nan
 
 portfolio_level = daily.loc[daily["checkin_date"].eq(selected_ts), "Demand Level"]
 demand_level = portfolio_level.iloc[0] if not portfolio_level.empty else "No data"
 high_dates = int(daily["Demand Level"].isin(["Very High", "High"]).sum())
 active_hotels = int(selected_detail["ProductID"].nunique())
+rising_hotels = int(selected_detail["Search_Change"].gt(0).sum())
+hotel_median = selected_detail["search_volume"].median() if not selected_detail.empty else 0
+hotel_q75 = selected_detail["search_volume"].quantile(0.75) if not selected_detail.empty else 0
+hotel_change_pct = np.where(
+    selected_detail["Previous_Searches"].gt(0),
+    selected_detail["Search_Change"] / selected_detail["Previous_Searches"],
+    np.nan,
+)
+action_hotels = int(
+    (
+        (
+            selected_detail["search_volume"].ge(hotel_q75)
+            & pd.Series(hotel_change_pct, index=selected_detail.index).ge(0.25)
+        )
+        | (
+            selected_detail["search_volume"].ge(hotel_median)
+            & pd.Series(hotel_change_pct, index=selected_detail.index).ge(0.10)
+        )
+        | (
+            selected_detail["Previous_Searches"].isna()
+            & selected_detail["search_volume"].ge(hotel_q75)
+        )
+    ).sum()
+)
+date_signal = (
+    "No baseline"
+    if pd.isna(change_pct)
+    else "Critical surge"
+    if change_pct >= 0.25
+    else "High increase"
+    if change_pct >= 0.10
+    else "Declining"
+    if change_pct <= -0.10
+    else "Stable"
+)
 
-k1, k2, k3, k4 = st.columns(4)
-k1.metric("Demand level", demand_level, help="Based on this date's searches compared with other check-in dates")
-k2.metric("Searches", f"{selected_searches:,.0f}", help="Latest cumulative searches for the selected check-in date")
-k3.metric("Views", f"{selected_views:,.0f}", help="Latest cumulative views for the selected check-in date")
-k4.metric("Hotels with demand", f"{active_hotels:,}", help="Hotels represented on the selected check-in date")
+k1, k2, k3, k4, k5 = st.columns(5)
+k1.metric("Demand signal", date_signal, help="Change versus the previous upload")
+k2.metric("Latest searches", f"{selected_searches:,.0f}")
+k3.metric(
+    "Change vs previous upload",
+    "No baseline" if pd.isna(change_pct) else f"{change_pct:+.1%}",
+    delta=None if pd.isna(search_change) else f"{search_change:+,.0f} searches",
+)
+k4.metric("Hotels rising", f"{rising_hotels:,} of {active_hotels:,}")
+k5.metric("Hotels requiring action", f"{action_hotels:,}")
 
 
 chart_col, dates_col = st.columns([2.15, 1])

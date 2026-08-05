@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from dashboard.utils.data import load_demand, load_engine, load_funnel
+from dashboard.utils.data import load_engine, load_funnel
 from dashboard.utils.ui import apply_theme
 
 
@@ -42,9 +42,15 @@ def prepare_hotel_data(
         master, on="ProductID", how="left", validate="many_to_one"
     )
     detail["checkin_date"] = pd.to_datetime(detail["checkin_date"], errors="coerce").dt.normalize()
+    for column in ["Previous_Searches", "Search_Change", "View_Change"]:
+        if column not in detail:
+            detail[column] = np.nan
     for column in [
         "search_volume",
         "view_volume",
+        "Previous_Searches",
+        "Search_Change",
+        "View_Change",
         "Internal_Worst_Gap",
         "Internal_Median_Gap",
         "Internal_Comparable_Rates",
@@ -53,20 +59,6 @@ def prepare_hotel_data(
     ]:
         detail[column] = pd.to_numeric(detail[column], errors="coerce")
     return master, detail.dropna(subset=["checkin_date"])
-
-
-@st.cache_data(show_spinner=False)
-def movement_for_hotel(demand: pd.DataFrame, product_id: int) -> pd.DataFrame:
-    history = demand[demand["ProductID"].eq(product_id)].copy()
-    history["search_volume"] = pd.to_numeric(history["search_volume"], errors="coerce").fillna(0)
-    history["view_volume"] = pd.to_numeric(history["view_volume"], errors="coerce").fillna(0)
-    history = history.sort_values(["checkin_date", "snapshot_at"])
-    history["Previous Searches"] = history.groupby("checkin_date")["search_volume"].shift(1)
-    history["Previous Views"] = history.groupby("checkin_date")["view_volume"].shift(1)
-    latest = history.drop_duplicates("checkin_date", keep="last").copy()
-    latest["Search Increase"] = (latest["search_volume"] - latest["Previous Searches"]).clip(lower=0)
-    latest["View Increase"] = (latest["view_volume"] - latest["Previous Views"]).clip(lower=0)
-    return latest[["checkin_date", "Search Increase", "View Increase"]]
 
 
 def internal_status(gap: float | None) -> tuple[str, str, str]:
@@ -111,7 +103,6 @@ def tool_card(title: str, status: str, detail: str, tone: str) -> None:
 
 engine = load_engine()
 funnel = load_funnel()
-demand = load_demand()
 master, detail = prepare_hotel_data(engine, funnel)
 
 with st.sidebar:
@@ -204,13 +195,6 @@ if selected_rows.empty:
     st.stop()
 selected = selected_rows.iloc[0]
 
-movement = movement_for_hotel(demand, product_id)
-hotel_detail = hotel_detail.merge(movement, on="checkin_date", how="left", validate="one_to_one")
-hotel_detail[["Search Increase", "View Increase"]] = hotel_detail[
-    ["Search Increase", "View Increase"]
-].fillna(0)
-selected_movement = hotel_detail[hotel_detail["checkin_date"].eq(selected_ts)].iloc[0]
-
 search_median = hotel_detail["search_volume"].median()
 search_q75 = hotel_detail["search_volume"].quantile(0.75)
 search_q90 = hotel_detail["search_volume"].quantile(0.90)
@@ -225,6 +209,31 @@ demand_level = (
     else "Low"
 )
 baseline_change = selected_searches / search_median - 1 if search_median else np.nan
+hotel_detail["Change_Pct"] = np.where(
+    hotel_detail["Previous_Searches"].gt(0),
+    hotel_detail["Search_Change"] / hotel_detail["Previous_Searches"],
+    np.nan,
+)
+hotel_detail["Signal"] = np.select(
+    [
+        hotel_detail["Previous_Searches"].isna(),
+        hotel_detail["search_volume"].ge(search_q75) & hotel_detail["Change_Pct"].ge(0.25),
+        hotel_detail["search_volume"].ge(search_median) & hotel_detail["Change_Pct"].ge(0.10),
+        hotel_detail["Change_Pct"].le(-0.10),
+    ],
+    ["New demand", "Critical surge", "High increase", "Declining"],
+    default="Stable",
+)
+selected_change = float(selected["Search_Change"]) if pd.notna(selected["Search_Change"]) else np.nan
+selected_change_pct = (
+    selected_change / float(selected["Previous_Searches"])
+    if pd.notna(selected_change) and pd.notna(selected["Previous_Searches"]) and selected["Previous_Searches"] > 0
+    else np.nan
+)
+upload_change_text = "No baseline" if pd.isna(selected_change) else f"{selected_change:+,.0f} searches"
+change_detail_text = (
+    "no baseline" if pd.isna(selected_change_pct) else f"{selected_change_pct:+.1%} vs previous"
+)
 
 st.markdown(f"### {hotel['ProductName']}")
 st.caption(
@@ -236,7 +245,11 @@ k1, k2, k3, k4 = st.columns(4)
 k1.metric("Demand Level", demand_level, help="Selected date compared with this hotel’s other check-in dates")
 k2.metric("Searches", f"{selected_searches:,.0f}")
 k3.metric("Views", f"{selected['view_volume']:,.0f}")
-k4.metric("Latest Increase", f"+{selected_movement['Search Increase']:,.0f}")
+k4.metric(
+    "Change vs previous upload",
+    "No baseline" if pd.isna(selected_change_pct) else f"{selected_change_pct:+.1%}",
+    delta=None if pd.isna(selected_change) else f"{selected_change:+,.0f} searches",
+)
 
 chart_col, why_col = st.columns([2.15, 1])
 with chart_col:
@@ -288,7 +301,7 @@ with why_col:
     peak_date = hotel_detail.loc[hotel_detail["search_volume"].idxmax(), "checkin_date"]
     st.markdown(
         f'<div class="fact-list"><div><b>Demand:</b> {relative_text}</div>'
-        f'<div><b>Latest movement:</b> +{selected_movement["Search Increase"]:,.0f} searches</div>'
+        f'<div><b>Upload change:</b> {upload_change_text}</div>'
         f'<div><b>Peak check-in:</b> {peak_date:%d %b %Y}</div></div>',
         unsafe_allow_html=True,
     )
@@ -328,7 +341,7 @@ with t4:
     tool_card(
         "Demand Detail",
         demand_level,
-        f"{selected_searches:,.0f} searches · +{selected_movement['Search Increase']:,.0f} latest",
+        f"{selected_searches:,.0f} searches · {change_detail_text}",
         "danger" if demand_level == "Very High" else "warning" if demand_level == "High" else "info",
     )
 
@@ -354,7 +367,7 @@ demand_tab, parity_tab, distribution_tab = st.tabs(
 with demand_tab:
     st.subheader("Daily Demand Detail")
     demand_display = hotel_detail[
-        ["checkin_date", "search_volume", "view_volume", "Search Increase", "View Increase"]
+        ["checkin_date", "search_volume", "Change_Pct", "Signal"]
     ].copy()
     demand_display["Demand Level"] = np.select(
         [
@@ -368,23 +381,23 @@ with demand_tab:
     demand_display = demand_display.rename(
         columns={
             "checkin_date": "Check-in Date",
-            "search_volume": "Searches",
-            "view_volume": "Views",
+            "search_volume": "Latest Searches",
+            "Change_Pct": "Change %",
         }
     )
+    demand_display["Change %"] = demand_display["Change %"] * 100
     st.dataframe(
         demand_display[
-            ["Check-in Date", "Demand Level", "Searches", "Views", "Search Increase", "View Increase"]
+            ["Check-in Date", "Demand Level", "Latest Searches", "Change %", "Signal"]
         ],
         hide_index=True,
         width="stretch",
         height=330,
         column_config={
             "Check-in Date": st.column_config.DateColumn(format="DD MMM YYYY"),
-            "Searches": st.column_config.NumberColumn(format="localized"),
-            "Views": st.column_config.NumberColumn(format="localized"),
-            "Search Increase": st.column_config.NumberColumn(format="localized"),
-            "View Increase": st.column_config.NumberColumn(format="localized"),
+            "Latest Searches": st.column_config.NumberColumn(format="localized"),
+            "Change %": st.column_config.NumberColumn(format="%+.1f%%"),
+            "Signal": st.column_config.TextColumn(width="medium"),
         },
     )
 

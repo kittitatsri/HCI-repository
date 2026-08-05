@@ -16,13 +16,18 @@ def demand_source_path() -> Path:
 
 
 @st.cache_data(show_spinner=False)
+def _read_engine(path: str, modified_ns: int) -> pd.DataFrame:
+    return pd.read_csv(path)
+
+
 def load_engine() -> pd.DataFrame:
-    return pd.read_csv(ROOT / "data" / "processed" / "engine.csv")
+    path = ROOT / "data" / "processed" / "engine.csv"
+    return _read_engine(str(path), path.stat().st_mtime_ns)
 
 
 @st.cache_data(show_spinner=False)
-def load_demand() -> pd.DataFrame:
-    frame = pd.read_csv(demand_source_path())
+def _read_demand(path: str, modified_ns: int) -> pd.DataFrame:
+    frame = pd.read_csv(path)
     frame["snapshot_at"] = pd.to_datetime(
         frame["Time Stamp"].astype(str).str.replace("\u202f", " ", regex=False), errors="coerce"
     )
@@ -31,16 +36,26 @@ def load_demand() -> pd.DataFrame:
     return frame
 
 
+def load_demand() -> pd.DataFrame:
+    path = demand_source_path()
+    return _read_demand(str(path), path.stat().st_mtime_ns)
+
+
 @st.cache_data(show_spinner=False)
-def load_funnel() -> pd.DataFrame:
-    frame = pd.read_csv(ROOT / "data" / "processed" / "hotel_date_funnel.csv")
+def _read_funnel(path: str, modified_ns: int) -> pd.DataFrame:
+    frame = pd.read_csv(path)
     frame["checkin_date"] = pd.to_datetime(frame["checkin_date"], errors="coerce")
     frame["snapshot_at"] = pd.to_datetime(frame["snapshot_at"], errors="coerce")
     frame["ProductID"] = pd.to_numeric(frame["ProductID"], errors="coerce").astype("Int64")
     return frame
 
 
+def load_funnel() -> pd.DataFrame:
+    path = ROOT / "data" / "processed" / "hotel_date_funnel.csv"
+    return _read_funnel(str(path), path.stat().st_mtime_ns)
+
+
 def clear_data_cache() -> None:
-    load_engine.clear()
-    load_demand.clear()
-    load_funnel.clear()
+    _read_engine.clear()
+    _read_demand.clear()
+    _read_funnel.clear()
