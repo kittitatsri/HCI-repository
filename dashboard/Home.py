@@ -78,10 +78,10 @@ with st.sidebar:
 header_left, header_right = st.columns([4, 1])
 with header_left:
     st.title("Home Dashboard")
-    st.markdown("### Good morning, Kittitat 👋")
+    st.markdown("### Good morning 👋")
     st.caption("See where demand is strongest and which hotels to check first.")
 with header_right:
-    st.markdown('<div class="profile-card"><b>Kittitat Sri</b><br><span>Market Manager</span></div>', unsafe_allow_html=True)
+    st.markdown('<div class="profile-card"><b>Market Manager</b></div>', unsafe_allow_html=True)
 
 
 with st.expander("Update demand data", expanded=False):

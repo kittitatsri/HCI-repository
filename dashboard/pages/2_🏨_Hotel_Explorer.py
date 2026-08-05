@@ -127,7 +127,7 @@ with head_left:
     st.caption("Investigate one hotel for one check-in date.")
 with head_right:
     st.markdown(
-        '<div class="profile-card"><b>Kittitat Sri</b><br><span>Market Manager</span></div>',
+        '<div class="profile-card"><b>Market Manager</b></div>',
         unsafe_allow_html=True,
     )
 
