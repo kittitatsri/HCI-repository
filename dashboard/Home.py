@@ -16,13 +16,9 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from dashboard.utils.data import clear_data_cache, demand_source_path, load_engine, load_funnel
+from dashboard.utils.incremental import merge_incremental_demand
 from dashboard.utils.ui import apply_theme, style_table
-from scripts.pipeline import (
-    RAW_DIR,
-    REQUIRED_DEMAND_COLUMNS,
-    merge_incremental_demand,
-    run_pipeline,
-)
+from scripts.pipeline import RAW_DIR, REQUIRED_DEMAND_COLUMNS, run_pipeline
 
 
 DEMAND_FILENAMES = ("demand_latest.csv.gz", "demand_latest.csv")
