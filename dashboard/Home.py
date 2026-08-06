@@ -17,7 +17,12 @@ if str(ROOT) not in sys.path:
 
 from dashboard.utils.data import clear_data_cache, demand_source_path, load_engine, load_funnel
 from dashboard.utils.ui import apply_theme, style_table
-from scripts.pipeline import RAW_DIR, REQUIRED_DEMAND_COLUMNS, run_pipeline
+from scripts.pipeline import (
+    RAW_DIR,
+    REQUIRED_DEMAND_COLUMNS,
+    merge_incremental_demand,
+    run_pipeline,
+)
 
 
 DEMAND_FILENAMES = ("demand_latest.csv.gz", "demand_latest.csv")
@@ -89,7 +94,11 @@ with header_right:
 
 
 with st.expander("Update demand data", expanded=False):
-    upload = st.file_uploader("Upload the latest demand CSV or CSV.GZ", type=["csv", "gz"])
+    st.caption(
+        "Upload only the newest daily export. HCI keeps the existing history, appends new events, "
+        "and compares the updated state with the state before this upload."
+    )
+    upload = st.file_uploader("Upload the newest daily demand CSV or CSV.GZ", type=["csv", "gz"])
     if upload is not None:
         compressed = upload.name.lower().endswith(".csv.gz")
         try:
@@ -102,25 +111,62 @@ with st.expander("Update demand data", expanded=False):
             missing = REQUIRED_DEMAND_COLUMNS.difference(preview.columns)
             if missing:
                 st.error("Missing columns: " + ", ".join(sorted(missing)))
-            elif st.button("Process and refresh", type="primary"):
-                current_source = demand_source_path()
-                previous_suffix = ".csv.gz" if current_source.name.endswith(".csv.gz") else ".csv"
-                previous_destination = RAW_DIR / f"demand_previous{previous_suffix}"
-                previous_alternative = RAW_DIR / (
-                    "demand_previous.csv" if previous_suffix == ".csv.gz" else "demand_previous.csv.gz"
+            else:
+                preview_timestamp = pd.to_datetime(
+                    preview["Time Stamp"].astype(str).str.replace("\u202f", " ", regex=False),
+                    format="mixed",
+                    errors="coerce",
                 )
-                shutil.copy2(current_source, previous_destination)
-                previous_alternative.unlink(missing_ok=True)
-                destination = RAW_DIR / (DEMAND_FILENAMES[0] if compressed else DEMAND_FILENAMES[1])
-                alternative = RAW_DIR / (DEMAND_FILENAMES[1] if compressed else DEMAND_FILENAMES[0])
-                destination.write_bytes(upload.getvalue())
-                alternative.unlink(missing_ok=True)
-                with st.spinner("Refreshing daily hotel demand…"):
-                    run_pipeline(destination)
-                clear_data_cache()
-                prepare_home_data.clear()
-                st.success(f"Updated from {len(preview):,} demand rows.")
-                st.rerun()
+                if preview_timestamp.notna().any():
+                    st.caption(
+                        f"Uploaded period: {preview_timestamp.min():%d %b %Y, %H:%M} → "
+                        f"{preview_timestamp.max():%d %b %Y, %H:%M} · {len(preview):,} rows"
+                    )
+            if not missing and st.button("Merge daily file and refresh", type="primary"):
+                current_source = demand_source_path()
+                try:
+                    current_history = pd.read_csv(current_source)
+                    merged, merge_stats = merge_incremental_demand(current_history, preview)
+                except ValueError as exc:
+                    st.error(str(exc))
+                else:
+                    if not merge_stats["data_changed"]:
+                        st.info("This daily file is already included. No data was changed.")
+                    else:
+                        destination = RAW_DIR / DEMAND_FILENAMES[0]
+                        previous_destination = RAW_DIR / "demand_previous.csv.gz"
+                        merged_temp = RAW_DIR / ".demand_latest.merge.csv.gz"
+                        previous_temp = RAW_DIR / ".demand_previous.merge.csv.gz"
+                        update_succeeded = False
+                        try:
+                            with st.spinner("Merging the daily snapshot and refreshing HCI…"):
+                                current_history.to_csv(previous_temp, index=False, compression="gzip")
+                                merged.to_csv(merged_temp, index=False, compression="gzip")
+                                previous_temp.replace(previous_destination)
+                                merged_temp.replace(destination)
+                                (RAW_DIR / "demand_latest.csv").unlink(missing_ok=True)
+                                (RAW_DIR / "demand_previous.csv").unlink(missing_ok=True)
+                                try:
+                                    run_pipeline(destination)
+                                except Exception:
+                                    shutil.copy2(previous_destination, destination)
+                                    run_pipeline(destination)
+                                    raise
+                                update_succeeded = True
+                        except Exception as exc:
+                            st.error(f"The update failed and the previous demand state was restored: {exc}")
+                        finally:
+                            merged_temp.unlink(missing_ok=True)
+                            previous_temp.unlink(missing_ok=True)
+                        if update_succeeded:
+                            clear_data_cache()
+                            prepare_home_data.clear()
+                            st.success(
+                                f"Added {int(merge_stats['new_events']):,} new demand events from "
+                                f"{len(preview):,} uploaded rows. Complete history now contains "
+                                f"{len(merged):,} rows."
+                            )
+                            st.rerun()
 
 
 available_dates = daily["checkin_date"].dt.date.tolist()

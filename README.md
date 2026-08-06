@@ -22,7 +22,7 @@ Open `http://localhost:8501`.
 
 ## Daily refresh
 
-Use **Update demand data** on the Home page to upload the latest demand CSV. The app validates the columns, rebuilds `demand_summary.csv` and `engine.csv`, and refreshes the dashboards.
+Use **Update demand data** on the Home page to upload only the newest daily demand export. HCI keeps `demand_latest.csv.gz` as the complete event history, saves the state before the upload as `demand_previous.csv.gz`, appends new events, removes duplicate `Time Stamp + CheckInDate + ProductID` keys, and rebuilds the dashboard. Uploading the same daily file twice is a safe no-op.
 
 ## Pages
 

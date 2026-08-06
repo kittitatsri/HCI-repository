@@ -29,6 +29,16 @@ INTERNAL_PARITY_FILE = RAW_DIR / "internal price gap.csv"
 AGODA_PARITY_FILE = RAW_DIR / "agoda price gap.xlsx"
 DEMAND_FILENAMES = ("demand_latest.csv.gz", "demand_latest.csv")
 PREVIOUS_DEMAND_FILENAMES = ("demand_previous.csv.gz", "demand_previous.csv")
+DEMAND_EVENT_KEYS = ["Time Stamp", "CheckInDate", "ProductID"]
+VALID_CHECK_STATUSES = {"continues", "new entry", "modify"}
+
+
+def _parse_demand_timestamp(series: pd.Series) -> pd.Series:
+    return pd.to_datetime(
+        series.astype(str).str.replace("\u202f", " ", regex=False),
+        format="mixed",
+        errors="coerce",
+    )
 
 
 def resolve_demand_path() -> Path:
@@ -47,6 +57,96 @@ def resolve_previous_demand_path() -> Path | None:
         if path.exists():
             return path
     return None
+
+
+def merge_incremental_demand(
+    history: pd.DataFrame, incremental: pd.DataFrame
+) -> tuple[pd.DataFrame, dict[str, int | bool | pd.Timestamp]]:
+    """Append one incremental export to demand history without double-counting events."""
+    for label, frame in (("Current history", history), ("Uploaded file", incremental)):
+        missing = REQUIRED_DEMAND_COLUMNS.difference(frame.columns)
+        if missing:
+            raise ValueError(f"{label} is missing columns: {', '.join(sorted(missing))}")
+
+    incoming = incremental.copy()
+    incoming_status = incoming["check_status"].fillna("").astype(str).str.strip().str.lower()
+    invalid_statuses = sorted(
+        set(incoming_status[incoming_status.ne("")]).difference(VALID_CHECK_STATUSES)
+    )
+    if invalid_statuses:
+        raise ValueError(
+            "Uploaded check_status contains unsupported values: " + ", ".join(invalid_statuses)
+        )
+
+    combined = pd.concat([history, incoming], ignore_index=True, sort=False)
+    combined["_snapshot_key"] = _parse_demand_timestamp(combined["Time Stamp"])
+    combined["_checkin_key"] = pd.to_datetime(combined["CheckInDate"], errors="coerce").dt.normalize()
+    combined["_product_key"] = pd.to_numeric(combined["ProductID"], errors="coerce").astype("Int64")
+
+    invalid_key = combined[["_snapshot_key", "_checkin_key", "_product_key"]].isna().any(axis=1)
+    history_invalid = int(invalid_key.iloc[: len(history)].sum())
+    upload_invalid = int(invalid_key.iloc[len(history) :].sum())
+    if upload_invalid:
+        raise ValueError(
+            f"The uploaded file contains {upload_invalid:,} rows with an invalid Time Stamp, "
+            "CheckInDate, or ProductID. Correct these rows before uploading."
+        )
+    # Preserve legacy invalid history rows without allowing their missing keys to collapse together.
+    combined["_row_fallback"] = 0
+    if history_invalid:
+        combined.loc[invalid_key, "_row_fallback"] = combined.index[invalid_key] + 1
+
+    history_clean = (
+        combined.iloc[: len(history)]
+        .drop_duplicates(
+            ["_snapshot_key", "_checkin_key", "_product_key", "_row_fallback"], keep="last"
+        )
+        .sort_values("_snapshot_key", kind="stable")
+    )
+    before_dedup = len(combined)
+    combined = combined.drop_duplicates(
+        ["_snapshot_key", "_checkin_key", "_product_key", "_row_fallback"], keep="last"
+    ).sort_values("_snapshot_key", kind="stable")
+    duplicate_rows = before_dedup - len(combined)
+    history_keys = pd.MultiIndex.from_frame(
+        pd.DataFrame(
+            {
+                "snapshot": _parse_demand_timestamp(history["Time Stamp"]),
+                "checkin": pd.to_datetime(history["CheckInDate"], errors="coerce").dt.normalize(),
+                "product": pd.to_numeric(history["ProductID"], errors="coerce").astype("Int64"),
+            }
+        )
+    )
+    incoming_keys = pd.MultiIndex.from_frame(
+        pd.DataFrame(
+            {
+                "snapshot": _parse_demand_timestamp(incoming["Time Stamp"]),
+                "checkin": pd.to_datetime(incoming["CheckInDate"], errors="coerce").dt.normalize(),
+                "product": pd.to_numeric(incoming["ProductID"], errors="coerce").astype("Int64"),
+            }
+        )
+    )
+    new_events = int((~incoming_keys.unique().isin(history_keys)).sum())
+
+    result = combined.drop(
+        columns=["_snapshot_key", "_checkin_key", "_product_key", "_row_fallback"]
+    )
+    result = result.reindex(columns=list(history.columns) + [c for c in result.columns if c not in history.columns])
+    comparable_history = history_clean.drop(
+        columns=["_snapshot_key", "_checkin_key", "_product_key", "_row_fallback"]
+    ).reindex(columns=result.columns)
+    data_changed = not result.reset_index(drop=True).equals(comparable_history.reset_index(drop=True))
+    stats: dict[str, int | bool | pd.Timestamp] = {
+        "history_rows": len(history),
+        "uploaded_rows": len(incremental),
+        "new_events": new_events,
+        "duplicates_removed": duplicate_rows,
+        "merged_rows": len(result),
+        "data_changed": data_changed,
+        "upload_min_timestamp": _parse_demand_timestamp(incoming["Time Stamp"]).min(),
+        "upload_max_timestamp": _parse_demand_timestamp(incoming["Time Stamp"]).max(),
+    }
+    return result, stats
 
 
 def _safe_max_score(series: pd.Series) -> pd.Series:
