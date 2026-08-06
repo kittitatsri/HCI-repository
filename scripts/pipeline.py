@@ -69,6 +69,11 @@ def merge_incremental_demand(
             raise ValueError(f"{label} is missing columns: {', '.join(sorted(missing))}")
 
     incoming = incremental.copy()
+    missing_product = pd.to_numeric(incoming["ProductID"], errors="coerce").isna()
+    skipped_missing_product = int(missing_product.sum())
+    incoming = incoming.loc[~missing_product].copy()
+    if incoming.empty:
+        raise ValueError("Every uploaded row is missing ProductID; there is no demand data to merge.")
     incoming_status = incoming["check_status"].fillna("").astype(str).str.strip().str.lower()
     invalid_statuses = sorted(
         set(incoming_status[incoming_status.ne("")]).difference(VALID_CHECK_STATUSES)
@@ -139,6 +144,7 @@ def merge_incremental_demand(
     stats: dict[str, int | bool | pd.Timestamp] = {
         "history_rows": len(history),
         "uploaded_rows": len(incremental),
+        "skipped_missing_product": skipped_missing_product,
         "new_events": new_events,
         "duplicates_removed": duplicate_rows,
         "merged_rows": len(result),

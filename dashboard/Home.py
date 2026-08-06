@@ -32,6 +32,15 @@ st.set_page_config(
 )
 apply_theme()
 
+update_message = st.session_state.pop("demand_update_message", None)
+if update_message:
+    st.success(update_message["success"])
+    if update_message["skipped"]:
+        st.warning(
+            f"Skipped {update_message['skipped']:,} rows because ProductID was missing. "
+            "The remaining rows were processed normally."
+        )
+
 
 @st.cache_data(show_spinner=False)
 def prepare_home_data(engine: pd.DataFrame, funnel: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -157,11 +166,14 @@ with st.expander("Update demand data", expanded=False):
                         if update_succeeded:
                             clear_data_cache()
                             prepare_home_data.clear()
-                            st.success(
-                                f"Added {int(merge_stats['new_events']):,} new demand events from "
-                                f"{len(preview):,} uploaded rows. Complete history now contains "
-                                f"{len(merged):,} rows."
-                            )
+                            st.session_state["demand_update_message"] = {
+                                "success": (
+                                    f"Added {int(merge_stats['new_events']):,} new demand events from "
+                                    f"{len(preview):,} uploaded rows. Complete history now contains "
+                                    f"{len(merged):,} rows."
+                                ),
+                                "skipped": int(merge_stats["skipped_missing_product"]),
+                            }
                             st.rerun()
 
 
