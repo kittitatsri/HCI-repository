@@ -201,6 +201,7 @@ def prepare_demand(demand: pd.DataFrame) -> pd.DataFrame:
     demand["ProductID"] = pd.to_numeric(demand["ProductID"], errors="coerce").astype("Int64")
     demand["snapshot_at"] = pd.to_datetime(
         demand["Time Stamp"].astype(str).str.replace("\u202f", " ", regex=False),
+        format="mixed",
         errors="coerce",
     )
     demand["checkin_date"] = pd.to_datetime(demand["CheckInDate"], errors="coerce")
@@ -233,6 +234,25 @@ def build_latest_demand_by_checkin(demand: pd.DataFrame) -> pd.DataFrame:
             "check_status",
         ]
     ]
+
+
+def build_latest_destination_demand(demand: pd.DataFrame) -> pd.DataFrame:
+    """Return one current destination-search record per destination/check-in date."""
+    keys = ["Destination", "checkin_date"]
+    latest = (
+        demand.dropna(subset=keys + ["snapshot_at"])
+        .sort_values(keys + ["snapshot_at"])
+        .drop_duplicates(keys, keep="last")
+        .copy()
+    )
+    return latest[
+        ["Destination", "checkin_date", "snapshot_at", "search_volume"]
+    ].rename(
+        columns={
+            "snapshot_at": "Destination_Search_Snapshot",
+            "search_volume": "Destination_Searches",
+        }
+    )
 
 
 def load_booking_production() -> pd.DataFrame:
@@ -310,9 +330,19 @@ def build_hotel_date_funnel(
 ) -> pd.DataFrame:
     latest = build_latest_demand_by_checkin(demand)
     latest["checkin_date"] = latest["checkin_date"].dt.normalize()
-    latest["search_volume"] = pd.to_numeric(latest["search_volume"], errors="coerce").fillna(0)
+    latest = latest.rename(columns={"search_volume": "Raw_Destination_Search"})
     latest["view_volume"] = pd.to_numeric(latest["view_volume"], errors="coerce").fillna(0)
+    destination_latest = build_latest_destination_demand(demand)
+    destination_latest["checkin_date"] = destination_latest["checkin_date"].dt.normalize()
+    destination_latest["Destination_Searches"] = pd.to_numeric(
+        destination_latest["Destination_Searches"], errors="coerce"
+    ).fillna(0)
     funnel = latest.merge(
+        destination_latest,
+        on=["Destination", "checkin_date"],
+        how="left",
+        validate="many_to_one",
+    ).merge(
         load_booking_production(),
         on=["ProductID", "checkin_date"],
         how="left",
@@ -332,13 +362,13 @@ def build_hotel_date_funnel(
         validate="one_to_one",
     )
     funnel["Views_per_Search"] = np.where(
-        funnel["search_volume"].gt(0),
-        funnel["view_volume"] / funnel["search_volume"],
+        funnel["Destination_Searches"].gt(0),
+        funnel["view_volume"] / funnel["Destination_Searches"],
         np.nan,
     )
     funnel["Search_to_Booking"] = np.where(
-        funnel["search_volume"].gt(0),
-        funnel["Bookings"] / funnel["search_volume"],
+        funnel["view_volume"].gt(0),
+        funnel["Bookings"] / funnel["view_volume"],
         np.nan,
     )
     funnel["Internal_Comparable_Coverage"] = np.where(
@@ -348,13 +378,8 @@ def build_hotel_date_funnel(
     )
     if previous_demand is not None and not previous_demand.empty:
         previous = build_latest_demand_by_checkin(previous_demand)[
-            ["ProductID", "checkin_date", "search_volume", "view_volume"]
-        ].rename(
-            columns={
-                "search_volume": "Previous_Searches",
-                "view_volume": "Previous_Views",
-            }
-        )
+            ["ProductID", "checkin_date", "view_volume"]
+        ].rename(columns={"view_volume": "Previous_Views"})
         previous["checkin_date"] = previous["checkin_date"].dt.normalize()
         funnel = funnel.merge(
             previous,
@@ -362,22 +387,38 @@ def build_hotel_date_funnel(
             how="left",
             validate="one_to_one",
         )
-        new_vs_previous = funnel["Previous_Searches"].isna()
-        funnel["Search_Change"] = funnel["search_volume"] - funnel["Previous_Searches"].fillna(0)
+        previous_destination = build_latest_destination_demand(previous_demand).rename(
+            columns={
+                "Destination_Searches": "Previous_Destination_Searches",
+                "Destination_Search_Snapshot": "Previous_Destination_Search_Snapshot",
+            }
+        )
+        previous_destination["checkin_date"] = previous_destination["checkin_date"].dt.normalize()
+        funnel = funnel.merge(
+            previous_destination,
+            on=["Destination", "checkin_date"],
+            how="left",
+            validate="many_to_one",
+        )
+        new_vs_previous = funnel["Previous_Views"].isna() | funnel["check_status"].eq("new entry")
+        funnel["Destination_Search_Change"] = (
+            funnel["Destination_Searches"] - funnel["Previous_Destination_Searches"]
+        )
         funnel["View_Change"] = funnel["view_volume"] - funnel["Previous_Views"].fillna(0)
         funnel["Upload_Change_Status"] = np.select(
             [
                 new_vs_previous,
-                funnel["Search_Change"].gt(0),
-                funnel["Search_Change"].lt(0),
+                funnel["View_Change"].gt(0),
+                funnel["View_Change"].lt(0),
             ],
             ["New", "Up", "Down"],
             default="No change",
         )
     else:
-        funnel["Previous_Searches"] = np.nan
         funnel["Previous_Views"] = np.nan
-        funnel["Search_Change"] = np.nan
+        funnel["Previous_Destination_Searches"] = np.nan
+        funnel["Previous_Destination_Search_Snapshot"] = pd.NaT
+        funnel["Destination_Search_Change"] = np.nan
         funnel["View_Change"] = np.nan
         funnel["Upload_Change_Status"] = "No baseline"
     return funnel
@@ -387,12 +428,8 @@ def build_demand_summary(demand: pd.DataFrame) -> pd.DataFrame:
     keys = ["ProductID", "CheckInDate"]
     ordered = demand.sort_values(keys + ["snapshot_at"]).copy()
 
-    # Search and view are persistent cumulative counters. Their raw values
-    # describe the current total, while positive differences describe new
-    # activity observed within the loaded period.
-    ordered["Search_Increment"] = (
-        ordered.groupby(keys)["search_volume"].diff().fillna(0).clip(lower=0)
-    )
+    # Hotel views are persistent cumulative counters. Positive differences
+    # describe new hotel interest observed within the loaded period.
     ordered["View_Increment"] = (
         ordered.groupby(keys)["view_volume"].diff().fillna(0).clip(lower=0)
     )
@@ -406,9 +443,7 @@ def build_demand_summary(demand: pd.DataFrame) -> pd.DataFrame:
             Peak_Hotness=("hotness_score", "max"),
             Avg_Hotness=("hotness_score", "mean"),
             Current_Trend=("trend_momentum", "mean"),
-            Current_Search=("search_volume", "sum"),
             Current_Views=("view_volume", "sum"),
-            Peak_CheckIn_Search=("search_volume", "max"),
             Peak_CheckIn_Views=("view_volume", "max"),
             Latest_Snapshot=("snapshot_at", "max"),
         )
@@ -416,7 +451,6 @@ def build_demand_summary(demand: pd.DataFrame) -> pd.DataFrame:
     movement = (
         ordered.groupby(["ProductID", "ProductName"], as_index=False)
         .agg(
-            Observed_Search_Increase=("Search_Increment", "sum"),
             Observed_View_Increase=("View_Increment", "sum"),
             Modification_Count=("Status_Modified", "sum"),
         )
@@ -428,7 +462,7 @@ def build_demand_summary(demand: pd.DataFrame) -> pd.DataFrame:
         .rename(columns={"snapshot_at": "Last_Modified_At"})
     )
     peak_dates = (
-        latest_by_checkin.sort_values(["ProductID", "search_volume", "checkin_date"])
+        latest_by_checkin.sort_values(["ProductID", "view_volume", "checkin_date"])
         .drop_duplicates("ProductID", keep="last")
         [["ProductID", "checkin_date"]]
         .rename(columns={"checkin_date": "Peak_CheckIn_Date"})
@@ -439,8 +473,8 @@ def build_demand_summary(demand: pd.DataFrame) -> pd.DataFrame:
     summary["Demand_Score"] = (
         summary["Current_Hotness"].fillna(0) * 40
         + summary["Current_Trend"].fillna(0) * 20
-        + _safe_max_score(summary["Observed_Search_Increase"]) * 0.25
-        + _safe_max_score(summary["Observed_View_Increase"]) * 0.15
+        + _safe_max_score(summary["Current_Views"]) * 0.20
+        + _safe_max_score(summary["Observed_View_Increase"]) * 0.20
     ).round(2)
     return summary
 
@@ -487,7 +521,7 @@ def build_engine(
         hotel_funnel = (
             funnel.groupby("ProductID", as_index=False)
             .agg(
-                Funnel_Searches=("search_volume", "sum"),
+                Destination_Search_Context=("Destination_Searches", "max"),
                 Funnel_Views=("view_volume", "sum"),
                 Funnel_Bookings=("Bookings", "sum"),
                 Internal_Worst_Gap=("Internal_Worst_Gap", "min"),
@@ -499,13 +533,13 @@ def build_engine(
             )
         )
         hotel_funnel["Views_per_Search"] = np.where(
-            hotel_funnel["Funnel_Searches"].gt(0),
-            hotel_funnel["Funnel_Views"] / hotel_funnel["Funnel_Searches"],
+            hotel_funnel["Destination_Search_Context"].gt(0),
+            hotel_funnel["Funnel_Views"] / hotel_funnel["Destination_Search_Context"],
             np.nan,
         )
         hotel_funnel["Search_to_Booking"] = np.where(
-            hotel_funnel["Funnel_Searches"].gt(0),
-            hotel_funnel["Funnel_Bookings"] / hotel_funnel["Funnel_Searches"],
+            hotel_funnel["Funnel_Views"].gt(0),
+            hotel_funnel["Funnel_Bookings"] / hotel_funnel["Funnel_Views"],
             np.nan,
         )
         engine = engine.merge(hotel_funnel, on="ProductID", how="left", validate="one_to_one")
@@ -547,7 +581,7 @@ def build_engine(
     agoda_disadvantage = engine.get(
         "Agoda_Price_Disadvantage", pd.Series(np.nan, index=engine.index)
     )
-    searches = engine.get("Funnel_Searches", pd.Series(0, index=engine.index)).fillna(0)
+    views = engine.get("Funnel_Views", pd.Series(0, index=engine.index)).fillna(0)
     bookings = engine.get("Funnel_Bookings", pd.Series(0, index=engine.index)).fillna(0)
     conditions = [
         agoda.eq("Not Mapped"),
@@ -555,7 +589,7 @@ def build_engine(
         agoda.eq("Not Live"),
         internal_gap.lt(0),
         agoda_disadvantage.gt(0),
-        searches.gt(0) & bookings.eq(0) & engine["Demand_Score"].ge(engine["Demand_Score"].median()),
+        views.gt(0) & bookings.eq(0) & engine["Demand_Score"].ge(engine["Demand_Score"].median()),
         ctrip.eq("Not Mapped"),
         ctrip.eq("Not Live"),
         engine["Opportunity Index"].ge(70),

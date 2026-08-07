@@ -2,7 +2,7 @@
 
 A Streamlit application that converts hotel-demand snapshots and commercial performance data into demand analytics, ranked opportunities, and hotel-level recommendations.
 
-Search and view volumes are treated as persistent cumulative counters. The engine keeps current cumulative totals and separately calculates observed positive increases between snapshots. `No Room` means hotel-level mapping is complete but room-type mapping is still required; it is not treated as an availability issue.
+Search volume is destination-level demand and is counted once per `Destination + CheckInDate`. View volume is hotel-specific interest and is evaluated per `ProductID + CheckInDate`. The engine uses destination search change for the market signal and hotel view level/change for hotel prioritization. `Continues`, `New Entry`, and `Modify` are processed chronologically, with the newest row becoming the current state. `No Room` means hotel-level mapping is complete but room-type mapping is still required; it is not treated as an availability issue.
 
 ## Run
 
@@ -59,7 +59,7 @@ It produces:
 - `data/processed/hotel_date_funnel.csv`
 - `data/processed/engine.csv`
 
-Demand uses the latest cumulative Search and View value for each
-`ProductID + CheckInDate`. Bookings join on the same key. Internal and Agoda
+Demand uses the latest destination Search value for each `Destination + CheckInDate`
+and the latest hotel View value for each `ProductID + CheckInDate`. Bookings join on the hotel/date key. Internal and Agoda
 parity are kept as separate signals and matched by the same calendar date,
 which the dashboard labels as first-night parity.

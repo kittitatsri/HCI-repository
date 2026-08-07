@@ -48,23 +48,19 @@ def prepare_home_data(engine: pd.DataFrame, funnel: pd.DataFrame) -> tuple[pd.Da
     hotel_master = engine[hotel_columns].drop_duplicates("ProductID")
     detail = funnel.merge(hotel_master, on="ProductID", how="left", validate="many_to_one")
     detail["checkin_date"] = pd.to_datetime(detail["checkin_date"], errors="coerce").dt.normalize()
-    detail["search_volume"] = pd.to_numeric(detail["search_volume"], errors="coerce").fillna(0)
     detail["view_volume"] = pd.to_numeric(detail["view_volume"], errors="coerce").fillna(0)
-    for column in ["Previous_Searches", "Search_Change"]:
+    for column in [
+        "Destination_Searches",
+        "Previous_Destination_Searches",
+        "Destination_Search_Change",
+        "Previous_Views",
+        "View_Change",
+    ]:
         if column not in detail:
             detail[column] = np.nan
         detail[column] = pd.to_numeric(detail[column], errors="coerce")
     detail = detail.dropna(subset=["checkin_date"])
-
-    daily = (
-        detail.groupby("checkin_date", as_index=False)
-        .agg(
-            Searches=("search_volume", "sum"),
-            Views=("view_volume", "sum"),
-            Hotels=("ProductID", "nunique"),
-        )
-        .sort_values("checkin_date")
-    )
+    daily = build_daily_market(detail)
     q40, q75, q90 = daily["Searches"].quantile([0.40, 0.75, 0.90])
     daily["Demand Level"] = np.select(
         [daily["Searches"].ge(q90), daily["Searches"].ge(q75), daily["Searches"].ge(q40)],
@@ -72,6 +68,17 @@ def prepare_home_data(engine: pd.DataFrame, funnel: pd.DataFrame) -> tuple[pd.Da
         default="Low",
     )
     return detail, daily
+
+
+def build_daily_market(detail: pd.DataFrame) -> pd.DataFrame:
+    destination = detail.drop_duplicates(["Destination", "checkin_date"])
+    searches = destination.groupby("checkin_date", as_index=False).agg(
+        Searches=("Destination_Searches", "sum")
+    )
+    hotels = detail.groupby("checkin_date", as_index=False).agg(
+        Views=("view_volume", "sum"), Hotels=("ProductID", "nunique")
+    )
+    return searches.merge(hotels, on="checkin_date", how="outer").sort_values("checkin_date")
 
 
 def level_badge(level: str) -> str:
@@ -205,21 +212,18 @@ if destinations:
     selected_detail = selected_detail[selected_detail["Destination"].isin(destinations)]
     trend_detail = trend_detail[trend_detail["Destination"].isin(destinations)]
 
-selected_daily = (
-    trend_detail.groupby("checkin_date", as_index=False)
-    .agg(Searches=("search_volume", "sum"), Views=("view_volume", "sum"), Hotels=("ProductID", "nunique"))
-    .sort_values("checkin_date")
-)
+selected_daily = build_daily_market(trend_detail)
 selected_row = selected_daily[selected_daily["checkin_date"].eq(selected_ts)]
-selected_searches = float(selected_detail["search_volume"].sum())
+selected_destinations = selected_detail.drop_duplicates(["Destination", "checkin_date"]).copy()
+selected_searches = float(selected_destinations["Destination_Searches"].sum())
 previous_searches = (
-    float(selected_detail["Previous_Searches"].sum(min_count=1))
-    if selected_detail["Previous_Searches"].notna().any()
+    float(selected_destinations["Previous_Destination_Searches"].sum(min_count=1))
+    if selected_destinations["Previous_Destination_Searches"].notna().any()
     else np.nan
 )
 search_change = (
-    float(selected_detail["Search_Change"].sum(min_count=1))
-    if selected_detail["Search_Change"].notna().any()
+    float(selected_destinations["Destination_Search_Change"].sum(min_count=1))
+    if selected_destinations["Destination_Search_Change"].notna().any()
     else np.nan
 )
 change_pct = search_change / previous_searches if previous_searches and pd.notna(search_change) else np.nan
@@ -228,27 +232,41 @@ portfolio_level = daily.loc[daily["checkin_date"].eq(selected_ts), "Demand Level
 demand_level = portfolio_level.iloc[0] if not portfolio_level.empty else "No data"
 high_dates = int(daily["Demand Level"].isin(["Very High", "High"]).sum())
 active_hotels = int(selected_detail["ProductID"].nunique())
-rising_hotels = int(selected_detail["Search_Change"].gt(0).sum())
-hotel_median = selected_detail["search_volume"].median() if not selected_detail.empty else 0
-hotel_q75 = selected_detail["search_volume"].quantile(0.75) if not selected_detail.empty else 0
-hotel_change_pct = np.where(
-    selected_detail["Previous_Searches"].gt(0),
-    selected_detail["Search_Change"] / selected_detail["Previous_Searches"],
+rising_hotels = int(selected_detail["View_Change"].gt(0).sum())
+hotel_q75 = selected_detail["view_volume"].quantile(0.75) if not selected_detail.empty else 0
+selected_detail["View Change %"] = np.where(
+    selected_detail["Previous_Views"].gt(0),
+    selected_detail["View_Change"] / selected_detail["Previous_Views"],
     np.nan,
+)
+destination_change_pct = np.where(
+    selected_destinations["Previous_Destination_Searches"].gt(0),
+    selected_destinations["Destination_Search_Change"]
+    / selected_destinations["Previous_Destination_Searches"],
+    np.nan,
+)
+selected_destinations["Destination Signal"] = np.select(
+    [
+        selected_destinations["Previous_Destination_Searches"].isna(),
+        pd.Series(destination_change_pct, index=selected_destinations.index).ge(0.25),
+        pd.Series(destination_change_pct, index=selected_destinations.index).ge(0.10),
+        pd.Series(destination_change_pct, index=selected_destinations.index).le(-0.10),
+    ],
+    ["New demand", "Critical surge", "High increase", "Declining"],
+    default="Stable",
+)
+selected_detail = selected_detail.merge(
+    selected_destinations[["Destination", "Destination Signal"]],
+    on="Destination",
+    how="left",
+    validate="many_to_one",
 )
 action_hotels = int(
     (
-        (
-            selected_detail["search_volume"].ge(hotel_q75)
-            & pd.Series(hotel_change_pct, index=selected_detail.index).ge(0.25)
-        )
-        | (
-            selected_detail["search_volume"].ge(hotel_median)
-            & pd.Series(hotel_change_pct, index=selected_detail.index).ge(0.10)
-        )
-        | (
-            selected_detail["Previous_Searches"].isna()
-            & selected_detail["search_volume"].ge(hotel_q75)
+        selected_detail["Destination Signal"].isin(["Critical surge", "High increase", "New demand"])
+        & (
+            selected_detail["View_Change"].gt(0)
+            | selected_detail["view_volume"].ge(hotel_q75)
         )
     ).sum()
 )
@@ -265,14 +283,14 @@ date_signal = (
 )
 
 k1, k2, k3, k4, k5 = st.columns(5)
-k1.metric("Demand signal", date_signal, help="Change versus the previous upload")
-k2.metric("Latest searches", f"{selected_searches:,.0f}")
+k1.metric("Destination demand signal", date_signal, help="Destination search change versus the previous upload")
+k2.metric("Destination searches", f"{selected_searches:,.0f}")
 k3.metric(
     "Change vs previous upload",
     "No baseline" if pd.isna(change_pct) else f"{change_pct:+.1%}",
     delta=None if pd.isna(search_change) else f"{search_change:+,.0f} searches",
 )
-k4.metric("Hotels rising", f"{rising_hotels:,} of {active_hotels:,}")
+k4.metric("Hotels with rising views", f"{rising_hotels:,} of {active_hotels:,}")
 k5.metric("Hotels requiring action", f"{action_hotels:,}")
 
 
@@ -325,40 +343,60 @@ with dates_col:
 
 
 st.subheader(f"Hotels to check — {selected_ts:%d %b %Y}")
-st.caption("Prioritized by latest search demand for the selected check-in date. Inventory and parity are checked outside HCI.")
+st.caption(
+    "Prioritized by destination search demand and hotel-specific views. "
+    "Inventory and parity are checked outside HCI."
+)
 
+signal_order = {"Critical surge": 5, "High increase": 4, "New demand": 3, "Stable": 2, "Declining": 1}
+selected_detail["Signal Order"] = selected_detail["Destination Signal"].map(signal_order).fillna(0)
 hotel_table = selected_detail.sort_values(
-    ["search_volume", "view_volume", "ProductName"], ascending=[False, False, True]
+    ["Signal Order", "View_Change", "view_volume", "ProductName"],
+    ascending=[False, False, False, True],
 ).head(12).copy()
 hotel_table["Priority"] = np.arange(1, len(hotel_table) + 1)
 if not hotel_table.empty:
-    hotel_q50 = hotel_table["search_volume"].quantile(0.50)
-    hotel_q80 = hotel_table["search_volume"].quantile(0.80)
+    hotel_q50 = selected_detail["view_volume"].quantile(0.50)
+    hotel_q80 = selected_detail["view_volume"].quantile(0.80)
     hotel_table["Demand Level"] = np.select(
-        [hotel_table["search_volume"].ge(hotel_q80), hotel_table["search_volume"].ge(hotel_q50)],
+        [hotel_table["view_volume"].ge(hotel_q80), hotel_table["view_volume"].ge(hotel_q50)],
         ["Very High", "High"],
         default="Medium",
     )
     hotel_table["Why prioritized"] = np.select(
-        [hotel_table["Demand Level"].eq("Very High"), hotel_table["Demand Level"].eq("High")],
-        ["Highest search demand", "Strong search demand"],
-        default="Demand to monitor",
+        [
+            hotel_table["Destination Signal"].isin(["Critical surge", "High increase"])
+            & hotel_table["View_Change"].gt(0),
+            hotel_table["Demand Level"].eq("Very High"),
+        ],
+        ["Destination rising + hotel views rising", "High hotel views"],
+        default="Hotel interest to monitor",
     )
     hotel_table["Next step"] = "Check inventory → parity"
     hotel_table = hotel_table.rename(
-        columns={"ProductName": "Hotel", "search_volume": "Searches", "view_volume": "Views"}
+        columns={"ProductName": "Hotel", "view_volume": "Latest Views"}
     )
+    hotel_table["View Change %"] = hotel_table["View Change %"] * 100
     st.dataframe(
         style_table(hotel_table[
-            ["Priority", "Hotel", "Destination", "Demand Level", "Searches", "Views", "Why prioritized", "Next step"]
+            [
+                "Priority",
+                "Hotel",
+                "Destination",
+                "Destination Signal",
+                "Latest Views",
+                "View Change %",
+                "Why prioritized",
+                "Next step",
+            ]
         ]),
         hide_index=True,
         width="stretch",
         height=455,
         column_config={
             "Priority": st.column_config.NumberColumn("Priority", format="%d", width="small"),
-            "Searches": st.column_config.NumberColumn("Searches", format="localized"),
-            "Views": st.column_config.NumberColumn("Views", format="localized"),
+            "Latest Views": st.column_config.NumberColumn("Latest Views", format="localized"),
+            "View Change %": st.column_config.NumberColumn("View Change %", format="%+.1f%%"),
             "Next step": st.column_config.TextColumn("Next step", width="medium"),
         },
     )

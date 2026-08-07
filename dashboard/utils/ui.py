@@ -132,7 +132,17 @@ def style_table(frame: pd.DataFrame) -> pd.io.formats.style.Styler:
     semantic_columns = [
         column
         for column in frame.columns
-        if column in {"Signal", "Demand Level", "Status", "Agoda Status", "Ctrip Status", "Next step", "Next Action"}
+        if column in {
+            "Signal",
+            "Destination Signal",
+            "Hotel Signal",
+            "Demand Level",
+            "Status",
+            "Agoda Status",
+            "Ctrip Status",
+            "Next step",
+            "Next Action",
+        }
     ]
     if semantic_columns:
         styler = styler.map(semantic_color, subset=semantic_columns)

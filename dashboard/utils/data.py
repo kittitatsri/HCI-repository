@@ -24,7 +24,9 @@ def load_demand() -> pd.DataFrame:
     path = demand_source_path()
     frame = pd.read_csv(path)
     frame["snapshot_at"] = pd.to_datetime(
-        frame["Time Stamp"].astype(str).str.replace("\u202f", " ", regex=False), errors="coerce"
+        frame["Time Stamp"].astype(str).str.replace("\u202f", " ", regex=False),
+        format="mixed",
+        errors="coerce",
     )
     frame["checkin_date"] = pd.to_datetime(frame["CheckInDate"], errors="coerce")
     frame["ProductID"] = pd.to_numeric(frame["ProductID"], errors="coerce").astype("Int64")

@@ -32,6 +32,7 @@ def quality_profile() -> dict[str, object]:
     raw_demand["_checkin_date"] = pd.to_datetime(raw_demand["CheckInDate"], errors="coerce")
     raw_demand["_snapshot_at"] = pd.to_datetime(
         raw_demand["Time Stamp"].astype(str).str.replace("\u202f", " ", regex=False),
+        format="mixed",
         errors="coerce",
     )
     master = pd.read_excel(master_path)
@@ -236,10 +237,16 @@ with right:
     st.dataframe(style_table(pd.DataFrame(freshness_rows)), hide_index=True, width="stretch", height=250)
     st.caption("File modified time confirms the local file version, not when the upstream source generated it.")
 
-coverage = (
-    funnel.groupby("checkin_date", as_index=False)
-    .agg(Hotels=("ProductID", "nunique"), Searches=("search_volume", "sum"))
-    .sort_values("checkin_date")
+coverage_hotels = funnel.groupby("checkin_date", as_index=False).agg(
+    Hotels=("ProductID", "nunique")
+)
+coverage_searches = (
+    funnel.drop_duplicates(["Destination", "checkin_date"])
+    .groupby("checkin_date", as_index=False)
+    .agg(Destination_Searches=("Destination_Searches", "sum"))
+)
+coverage = coverage_hotels.merge(coverage_searches, on="checkin_date", how="left").sort_values(
+    "checkin_date"
 )
 max_hotels = coverage["Hotels"].max()
 coverage["Coverage"] = pd.cut(
@@ -268,7 +275,7 @@ with coverage_col:
             tooltip=[
                 alt.Tooltip("checkin_date:T", title="Check-in", format="%d %b %Y"),
                 alt.Tooltip("Hotels:Q", format=",.0f"),
-                alt.Tooltip("Searches:Q", format=",.0f"),
+                alt.Tooltip("Destination_Searches:Q", title="Destination searches", format=",.0f"),
                 "Coverage:N",
             ],
         )
