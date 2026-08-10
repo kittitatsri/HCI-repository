@@ -296,28 +296,16 @@ k5.metric("Hotels requiring action", f"{action_hotels:,}")
 
 chart_col, dates_col = st.columns([2.15, 1])
 with chart_col:
-    st.subheader("Demand by check-in date")
-    chart_data = selected_daily.melt(
-        id_vars="checkin_date",
-        value_vars=["Searches", "Views"],
-        var_name="Metric",
-        value_name="Volume",
-    )
+    st.subheader("Destination search trend")
     base = (
-        alt.Chart(chart_data)
-        .mark_line(point=True, strokeWidth=2.5)
+        alt.Chart(selected_daily)
+        .mark_line(point=True, strokeWidth=2.5, color="#2563eb")
         .encode(
             x=alt.X("checkin_date:T", title=None, axis=alt.Axis(format="%d %b", labelAngle=-35)),
-            y=alt.Y("Volume:Q", title="Volume", axis=alt.Axis(format="~s")),
-            color=alt.Color(
-                "Metric:N",
-                title=None,
-                scale=alt.Scale(domain=["Searches", "Views"], range=["#2563eb", "#16a34a"]),
-            ),
+            y=alt.Y("Searches:Q", title="Destination searches", axis=alt.Axis(format="~s")),
             tooltip=[
                 alt.Tooltip("checkin_date:T", title="Check-in", format="%d %b %Y"),
-                "Metric:N",
-                alt.Tooltip("Volume:Q", format=",.0f"),
+                alt.Tooltip("Searches:Q", title="Destination searches", format=",.0f"),
             ],
         )
         .properties(height=310)
