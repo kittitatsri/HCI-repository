@@ -14,7 +14,13 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from dashboard.utils.data import load_engine, load_funnel
+from dashboard.utils.data import (
+    build_weekly_comparison,
+    iso_week_options,
+    load_demand,
+    load_engine,
+    load_funnel,
+)
 from dashboard.utils.ui import apply_theme, style_table
 
 
@@ -117,6 +123,28 @@ with head_right:
         '<div class="profile-card"><b>Market Manager</b></div>',
         unsafe_allow_html=True,
     )
+
+mode_col, week_col = st.columns([1.2, 2.8])
+view_mode = mode_col.radio("View", ["Daily", "Weekly"], horizontal=True)
+comparison_label = "previous upload"
+if view_mode == "Weekly":
+    demand_history = load_demand()
+    week_options = iso_week_options(demand_history)
+    week_labels = [label for label, _ in week_options]
+    selected_week_label = week_col.selectbox("ISO week", week_labels)
+    selected_week_start = dict(week_options)[selected_week_label]
+    weekly_funnel = build_weekly_comparison(demand_history, selected_week_start)
+    selected_week_end = selected_week_start + pd.Timedelta(days=7)
+    week_latest_snapshot = demand_history.loc[
+        demand_history["snapshot_at"].ge(selected_week_start)
+        & demand_history["snapshot_at"].lt(selected_week_end),
+        "snapshot_at",
+    ].max()
+    week_col.caption(f"Latest snapshot available: {week_latest_snapshot:%d %b %Y, %H:%M}")
+    master, detail, portfolio_daily = prepare_data(engine, weekly_funnel)
+    comparison_label = "previous ISO week"
+else:
+    week_col.caption("Daily compares the latest demand state with the previous upload.")
 
 available_dates = portfolio_daily["checkin_date"].dt.date.tolist()
 today = date.today()
@@ -276,13 +304,17 @@ date_signal = (
 )
 
 k1, k2, k3, k4, k5 = st.columns(5)
-k1.metric("Destination demand signal", date_signal, help="Destination search change versus the previous upload")
+k1.metric(
+    "Destination demand signal",
+    date_signal,
+    help=f"Destination search change versus the {comparison_label}",
+)
 k2.metric("Destination searches", f"{total_searches:,.0f}")
 k3.metric(
-    "Change vs previous upload",
+    "Change vs previous week" if view_mode == "Weekly" else "Change vs previous upload",
     "No baseline" if pd.isna(change_pct) else f"{change_pct:+.1%}",
     delta=None if pd.isna(total_change) else f"{total_change:+,.0f} searches",
-    help="Latest uploaded searches compared with the previous uploaded searches",
+    help=f"Latest observed searches compared with the {comparison_label}",
 )
 k4.metric("Hotels with rising views", f"{rising_hotels:,} of {active_hotels:,}")
 k5.metric("Hotels requiring action", f"{action_hotels:,}")
@@ -341,7 +373,7 @@ with destination_col:
         },
     )
 
-st.subheader("Daily demand change")
+st.subheader("Weekly demand change" if view_mode == "Weekly" else "Daily demand change")
 daily_display = filtered_daily.rename(
     columns={
         "checkin_date": "Check-in Date",
@@ -377,7 +409,7 @@ st.dataframe(
 
 st.subheader(f"Hotels to check — {selected_ts:%d %b %Y}")
 st.caption(
-    "Destination searches show market demand; hotel views show hotel-specific interest. "
+    f"Destination searches and hotel views are compared with the {comparison_label}. "
     "The dashboard does not show inventory or parity results."
 )
 

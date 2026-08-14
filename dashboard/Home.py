@@ -15,7 +15,15 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from dashboard.utils.data import clear_data_cache, demand_source_path, load_engine, load_funnel
+from dashboard.utils.data import (
+    build_weekly_comparison,
+    clear_data_cache,
+    demand_source_path,
+    iso_week_options,
+    load_demand,
+    load_engine,
+    load_funnel,
+)
 from dashboard.utils.incremental import merge_incremental_demand
 from dashboard.utils.ui import apply_theme, style_table
 from scripts.pipeline import RAW_DIR, REQUIRED_DEMAND_COLUMNS, run_pipeline
@@ -184,6 +192,28 @@ with st.expander("Update demand data", expanded=False):
                             st.rerun()
 
 
+mode_col, week_col = st.columns([1.2, 2.8])
+view_mode = mode_col.radio("View", ["Daily", "Weekly"], horizontal=True)
+comparison_label = "previous upload"
+if view_mode == "Weekly":
+    demand_history = load_demand()
+    week_options = iso_week_options(demand_history)
+    week_labels = [label for label, _ in week_options]
+    selected_week_label = week_col.selectbox("ISO week", week_labels)
+    selected_week_start = dict(week_options)[selected_week_label]
+    weekly_funnel = build_weekly_comparison(demand_history, selected_week_start)
+    selected_week_end = selected_week_start + pd.Timedelta(days=7)
+    week_latest_snapshot = demand_history.loc[
+        demand_history["snapshot_at"].ge(selected_week_start)
+        & demand_history["snapshot_at"].lt(selected_week_end),
+        "snapshot_at",
+    ].max()
+    week_col.caption(f"Latest snapshot available: {week_latest_snapshot:%d %b %Y, %H:%M}")
+    detail, daily = prepare_home_data(engine, weekly_funnel)
+    comparison_label = "previous ISO week"
+else:
+    week_col.caption("Daily compares the latest demand state with the previous upload.")
+
 available_dates = daily["checkin_date"].dt.date.tolist()
 today = date.today()
 default_date = today if today in available_dates else available_dates[0]
@@ -283,10 +313,14 @@ date_signal = (
 )
 
 k1, k2, k3, k4, k5 = st.columns(5)
-k1.metric("Destination demand signal", date_signal, help="Destination search change versus the previous upload")
+k1.metric(
+    "Destination demand signal",
+    date_signal,
+    help=f"Destination search change versus the {comparison_label}",
+)
 k2.metric("Destination searches", f"{selected_searches:,.0f}")
 k3.metric(
-    "Change vs previous upload",
+    "Change vs previous week" if view_mode == "Weekly" else "Change vs previous upload",
     "No baseline" if pd.isna(change_pct) else f"{change_pct:+.1%}",
     delta=None if pd.isna(search_change) else f"{search_change:+,.0f} searches",
 )
@@ -332,7 +366,7 @@ with dates_col:
 
 st.subheader(f"Hotels to check — {selected_ts:%d %b %Y}")
 st.caption(
-    "Prioritized by destination search demand and hotel-specific views. "
+    f"Prioritized by destination search demand and hotel-specific views versus the {comparison_label}. "
     "Inventory and parity are checked outside HCI."
 )
 

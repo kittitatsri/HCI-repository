@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import streamlit as st
 
@@ -31,6 +32,90 @@ def load_demand() -> pd.DataFrame:
     frame["checkin_date"] = pd.to_datetime(frame["CheckInDate"], errors="coerce")
     frame["ProductID"] = pd.to_numeric(frame["ProductID"], errors="coerce").astype("Int64")
     return frame
+
+
+def iso_week_options(demand: pd.DataFrame) -> list[tuple[str, pd.Timestamp]]:
+    """Return available ISO snapshot weeks, newest first."""
+    valid = demand["snapshot_at"].dropna().dt.normalize()
+    starts = valid - pd.to_timedelta(valid.dt.weekday, unit="D")
+    unique_starts = sorted(starts.drop_duplicates(), reverse=True)
+    options: list[tuple[str, pd.Timestamp]] = []
+    for start in unique_starts:
+        iso = start.isocalendar()
+        end = start + pd.Timedelta(days=6)
+        label = f"{iso.year}-W{iso.week:02d} ({start:%d %b}–{end:%d %b})"
+        options.append((label, pd.Timestamp(start)))
+    return options
+
+
+@st.cache_data(show_spinner=False)
+def build_weekly_comparison(demand: pd.DataFrame, week_start: pd.Timestamp) -> pd.DataFrame:
+    """Compare the last observed state in one ISO week with the prior ISO week."""
+    frame = demand.copy()
+    frame["snapshot_at"] = pd.to_datetime(frame["snapshot_at"], errors="coerce")
+    frame["checkin_date"] = pd.to_datetime(frame["checkin_date"], errors="coerce").dt.normalize()
+    frame["ProductID"] = pd.to_numeric(frame["ProductID"], errors="coerce").astype("Int64")
+    frame["search_volume"] = pd.to_numeric(frame["search_volume"], errors="coerce")
+    frame["view_volume"] = pd.to_numeric(frame["view_volume"], errors="coerce").fillna(0)
+    frame["check_status"] = (
+        frame["check_status"].fillna("unknown").astype(str).str.strip().str.lower()
+    )
+
+    selected_start = pd.Timestamp(week_start).normalize()
+    selected_end = selected_start + pd.Timedelta(days=7)
+    previous_start = selected_start - pd.Timedelta(days=7)
+    relevant = frame[
+        frame["snapshot_at"].ge(previous_start)
+        & frame["snapshot_at"].lt(selected_end)
+        & frame["checkin_date"].notna()
+    ].copy()
+    relevant["period"] = np.where(
+        relevant["snapshot_at"].ge(selected_start), "latest", "previous"
+    )
+
+    hotel_keys = ["ProductID", "checkin_date"]
+    hotel_rows = (
+        relevant.dropna(subset=["ProductID"])
+        .sort_values(hotel_keys + ["snapshot_at"])
+        .drop_duplicates(["period"] + hotel_keys, keep="last")
+    )
+    latest_hotels = hotel_rows[hotel_rows["period"].eq("latest")].copy()
+    previous_hotels = hotel_rows[hotel_rows["period"].eq("previous")][
+        hotel_keys + ["view_volume"]
+    ].rename(columns={"view_volume": "Previous_Views"})
+    latest_hotels = latest_hotels.merge(
+        previous_hotels, on=hotel_keys, how="left", validate="one_to_one"
+    )
+    latest_hotels["View_Change"] = latest_hotels["view_volume"] - latest_hotels["Previous_Views"]
+
+    destination_keys = ["Destination", "checkin_date"]
+    destination_rows = (
+        relevant.dropna(subset=["Destination"])
+        .sort_values(destination_keys + ["snapshot_at"])
+        .drop_duplicates(["period"] + destination_keys, keep="last")
+    )
+    latest_destinations = destination_rows[destination_rows["period"].eq("latest")][
+        destination_keys + ["search_volume"]
+    ].rename(columns={"search_volume": "Destination_Searches"})
+    previous_destinations = destination_rows[destination_rows["period"].eq("previous")][
+        destination_keys + ["search_volume"]
+    ].rename(columns={"search_volume": "Previous_Destination_Searches"})
+    destinations = latest_destinations.merge(
+        previous_destinations, on=destination_keys, how="left", validate="one_to_one"
+    )
+    destinations["Destination_Search_Change"] = (
+        destinations["Destination_Searches"] - destinations["Previous_Destination_Searches"]
+    )
+
+    result = latest_hotels.merge(
+        destinations, on=destination_keys, how="left", validate="many_to_one"
+    )
+    result["Upload_Change_Status"] = np.select(
+        [result["Previous_Views"].isna(), result["View_Change"].gt(0), result["View_Change"].lt(0)],
+        ["New", "Increase", "Decrease"],
+        default="No change",
+    )
+    return result
 
 
 def load_funnel() -> pd.DataFrame:
