@@ -15,13 +15,13 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from dashboard.utils.data import (
-    build_checkin_week_comparison,
     build_weekly_comparison,
     iso_week_options,
     load_demand,
     load_engine,
     load_funnel,
 )
+from dashboard.utils.checkin_week import build_checkin_week_comparison
 from dashboard.utils.ui import apply_theme, style_table
 
 

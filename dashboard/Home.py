@@ -16,7 +16,6 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from dashboard.utils.data import (
-    build_checkin_week_comparison,
     build_weekly_comparison,
     clear_data_cache,
     demand_source_path,
@@ -25,6 +24,7 @@ from dashboard.utils.data import (
     load_engine,
     load_funnel,
 )
+from dashboard.utils.checkin_week import build_checkin_week_comparison
 from dashboard.utils.incremental import merge_incremental_demand
 from dashboard.utils.ui import apply_theme, style_table
 from scripts.pipeline import RAW_DIR, REQUIRED_DEMAND_COLUMNS, run_pipeline
