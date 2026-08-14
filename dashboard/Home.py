@@ -16,6 +16,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from dashboard.utils.data import (
+    build_checkin_week_comparison,
     build_weekly_comparison,
     clear_data_cache,
     demand_source_path,
@@ -92,6 +93,144 @@ def build_daily_market(detail: pd.DataFrame) -> pd.DataFrame:
 def level_badge(level: str) -> str:
     class_name = str(level).lower().replace(" ", "-")
     return f'<span class="demand-badge {class_name}">{level}</span>'
+
+
+def render_checkin_week(detail: pd.DataFrame, week_start: pd.Timestamp) -> None:
+    week_end = week_start + pd.Timedelta(days=6)
+    previous_start = week_start - pd.Timedelta(days=7)
+    destinations = st.multiselect(
+        "Destination",
+        sorted(detail["Destination"].dropna().astype(str).unique()),
+        placeholder="All destinations",
+        key="checkin_week_destinations",
+    )
+    filtered = detail if not destinations else detail[detail["Destination"].isin(destinations)]
+    hotels, destination_week, weekday = build_checkin_week_comparison(filtered, week_start)
+
+    current_total = float(destination_week["Current_Searches"].sum())
+    previous_total = float(destination_week["Previous_Searches"].sum())
+    current_days = int(weekday.loc[weekday["Period"].eq("Selected week"), "checkin_date"].nunique())
+    previous_days = int(weekday.loc[weekday["Period"].eq("Previous week"), "checkin_date"].nunique())
+    complete = current_days == 7 and previous_days == 7
+    current_basis = current_total if complete else current_total / current_days if current_days else np.nan
+    previous_basis = previous_total if complete else previous_total / previous_days if previous_days else np.nan
+    change = current_basis - previous_basis if pd.notna(current_basis) and pd.notna(previous_basis) else np.nan
+    change_pct = change / previous_basis if previous_basis and pd.notna(change) else np.nan
+    signal = (
+        "No baseline" if pd.isna(change_pct) else
+        "Critical surge" if change_pct >= 0.25 else
+        "High increase" if change_pct >= 0.10 else
+        "Declining" if change_pct <= -0.10 else "Stable"
+    )
+
+    hotels["Destination Signal"] = np.select(
+        [
+            hotels["Previous_Searches"].eq(0) & hotels["Current_Searches"].gt(0),
+            hotels["Change_Pct"].ge(0.25),
+            hotels["Change_Pct"].ge(0.10),
+            hotels["Change_Pct"].le(-0.10),
+        ],
+        ["New demand", "Critical surge", "High increase", "Declining"],
+        default="Stable",
+    )
+    rising_hotels = int(hotels["View_Change"].gt(0).sum())
+    hotel_q75 = hotels["Current_Views"].quantile(0.75) if not hotels.empty else 0
+    hotels["Action"] = (
+        hotels["Destination Signal"].isin(["Critical surge", "High increase", "New demand"])
+        & (hotels["View_Change"].gt(0) | hotels["Current_Views"].ge(hotel_q75))
+    )
+
+    st.caption(
+        f"Check-in week: {week_start:%d %b}–{week_end:%d %b %Y} · "
+        f"Previous: {previous_start:%d %b}–{week_start - pd.Timedelta(days=1):%d %b %Y}"
+    )
+    if not complete:
+        st.warning(
+            f"Incomplete comparison: selected week has {current_days}/7 dates and previous week has "
+            f"{previous_days}/7. Change uses average searches per available day."
+        )
+
+    k1, k2, k3, k4, k5 = st.columns(5)
+    definition = (
+        "Is demand for this check-in week higher or lower than demand for last check-in week? "
+        "Compares check-in dates in the selected ISO week with dates in the previous ISO week."
+    )
+    k1.metric("Check-in week demand signal", signal, help=definition)
+    k2.metric("Selected week searches", f"{current_total:,.0f}", help=definition)
+    k3.metric(
+        "Change vs previous check-in week",
+        "No baseline" if pd.isna(change_pct) else f"{change_pct:+.1%}",
+        delta=None if pd.isna(change) else f"{change:+,.0f} {'searches/day' if not complete else 'searches'}",
+        help=definition,
+    )
+    k4.metric("Hotels with higher weekly views", f"{rising_hotels:,} of {len(hotels):,}")
+    k5.metric("Hotels requiring action", f"{int(hotels['Action'].sum()):,}")
+
+    chart_col, date_col = st.columns([2.15, 1])
+    with chart_col:
+        st.subheader("This check-in week vs previous week", help=definition)
+        chart = (
+            alt.Chart(weekday)
+            .mark_line(point=True, strokeWidth=2.5)
+            .encode(
+                x=alt.X("Weekday:O", sort=["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"], title=None),
+                y=alt.Y("Searches:Q", title="Destination searches", axis=alt.Axis(format="~s")),
+                color=alt.Color(
+                    "Period:N",
+                    scale=alt.Scale(
+                        domain=["Selected week", "Previous week"], range=["#2563eb", "#94a3b8"]
+                    ),
+                    title=None,
+                ),
+                tooltip=["Period:N", "Weekday:N", alt.Tooltip("Searches:Q", format=",.0f")],
+            )
+            .properties(height=310)
+        )
+        st.altair_chart(chart, width="stretch")
+    with date_col:
+        st.subheader("Strongest dates")
+        strongest = (
+            weekday[weekday["Period"].eq("Selected week")]
+            .sort_values("Searches", ascending=False)
+            .head(5)
+        )
+        for row in strongest.itertuples(index=False):
+            st.markdown(
+                f'<div class="date-row"><div><b>{row.checkin_date:%d %b %Y}</b><br>'
+                f'<span>{row.Searches:,.0f} destination searches</span></div></div>',
+                unsafe_allow_html=True,
+            )
+
+    st.subheader(f"Hotels to check — {week_start:%d %b}–{week_end:%d %b %Y}")
+    signal_order = {"Critical surge": 5, "High increase": 4, "New demand": 3, "Stable": 2, "Declining": 1}
+    hotels["Signal Order"] = hotels["Destination Signal"].map(signal_order).fillna(0)
+    hotels = hotels.sort_values(
+        ["Signal Order", "View_Change", "Current_Views"], ascending=[False, False, False]
+    ).reset_index(drop=True)
+    hotels["Priority"] = np.arange(1, len(hotels) + 1)
+    hotels["Next step"] = np.where(hotels["Action"], "Check inventory → parity", "Monitor")
+    display = hotels.rename(
+        columns={
+            "ProductName": "Hotel",
+            "Current_Views": "This Week Views",
+            "View_Change_Pct": "View Change %",
+        }
+    )
+    display["View Change %"] = display["View Change %"] * 100
+    st.dataframe(
+        style_table(display[[
+            "Priority", "Hotel", "Destination", "Destination Signal", "This Week Views",
+            "View Change %", "Next step",
+        ]].head(200)),
+        hide_index=True,
+        width="stretch",
+        height=455,
+        column_config={
+            "Priority": st.column_config.NumberColumn(format="%d", width="small"),
+            "This Week Views": st.column_config.NumberColumn(format="localized"),
+            "View Change %": st.column_config.NumberColumn(format="%+.1f%%"),
+        },
+    )
 
 
 engine = load_engine()
@@ -193,9 +332,11 @@ with st.expander("Update demand data", expanded=False):
 
 
 mode_col, week_col = st.columns([1.2, 2.8])
-view_mode = mode_col.radio("View", ["Daily", "Weekly"], horizontal=True)
+view_mode = mode_col.radio(
+    "Comparison view", ["Daily", "Snapshot Week", "Check-in Week"], horizontal=True
+)
 comparison_label = "previous upload"
-if view_mode == "Weekly":
+if view_mode == "Snapshot Week":
     demand_history = load_demand()
     week_options = iso_week_options(demand_history)
     week_labels = [label for label, _ in week_options]
@@ -211,6 +352,23 @@ if view_mode == "Weekly":
     week_col.caption(f"Latest snapshot available: {week_latest_snapshot:%d %b %Y, %H:%M}")
     detail, daily = prepare_home_data(engine, weekly_funnel)
     comparison_label = "previous ISO week"
+elif view_mode == "Check-in Week":
+    week_starts = (
+        daily["checkin_date"] - pd.to_timedelta(daily["checkin_date"].dt.weekday, unit="D")
+    ).drop_duplicates().sort_values(ascending=False)
+    week_options = {
+        f"{start.isocalendar().year}-W{start.isocalendar().week:02d} "
+        f"({start:%d %b}–{start + pd.Timedelta(days=6):%d %b})": start
+        for start in week_starts
+    }
+    current_week_start = pd.Timestamp(date.today()) - pd.Timedelta(days=date.today().weekday())
+    default_index = list(week_options.values()).index(current_week_start) if current_week_start in week_options.values() else 0
+    selected_label = week_col.selectbox("Check-in ISO week", list(week_options), index=default_index)
+    week_col.caption(
+        "Compares demand for this check-in week with demand for the previous check-in week."
+    )
+    render_checkin_week(detail, pd.Timestamp(week_options[selected_label]))
+    st.stop()
 else:
     week_col.caption("Daily compares the latest demand state with the previous upload.")
 
@@ -316,13 +474,25 @@ k1, k2, k3, k4, k5 = st.columns(5)
 k1.metric(
     "Destination demand signal",
     date_signal,
-    help=f"Destination search change versus the {comparison_label}",
+    help=(
+        "How did our demand snapshot change from one upload week to another? Compares demand "
+        "observed in the selected upload week with the previous upload week for the same "
+        "check-in date."
+        if view_mode == "Snapshot Week"
+        else "Compares the latest demand upload with the previous upload for the selected check-in date."
+    ),
 )
 k2.metric("Destination searches", f"{selected_searches:,.0f}")
 k3.metric(
-    "Change vs previous week" if view_mode == "Weekly" else "Change vs previous upload",
+    "Change vs previous snapshot week" if view_mode == "Snapshot Week" else "Change vs previous upload",
     "No baseline" if pd.isna(change_pct) else f"{change_pct:+.1%}",
     delta=None if pd.isna(search_change) else f"{search_change:+,.0f} searches",
+    help=(
+        "How did our demand snapshot change from one upload week to another? Compares the same "
+        "check-in date between the selected and previous upload weeks."
+        if view_mode == "Snapshot Week"
+        else "Compares the selected check-in date between the latest and previous demand uploads."
+    ),
 )
 k4.metric("Hotels with rising views", f"{rising_hotels:,} of {active_hotels:,}")
 k5.metric("Hotels requiring action", f"{action_hotels:,}")
