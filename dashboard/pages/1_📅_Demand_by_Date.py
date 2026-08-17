@@ -241,7 +241,7 @@ def render_checkin_week(
     display["View Change %"] = display["View Change %"] * 100
     st.dataframe(
         style_table(display[[
-            "Priority", "Hotel", "Destination", "Destination Signal", "This Week Views",
+            "Priority", "Hotel", "Destination", "This Week Views",
             "View Change %", "Work Priority",
         ]].head(200)),
         hide_index=True,
@@ -644,7 +644,6 @@ display = selected.rename(
 display_columns = [
     "Priority",
     "Hotel",
-    "Destination Signal",
     "Latest Views",
     "View Change %",
     "Hotel Signal",
@@ -660,7 +659,6 @@ st.dataframe(
         "Priority": st.column_config.NumberColumn(format="%d", width="small"),
         "Latest Views": st.column_config.NumberColumn(format="localized"),
         "View Change %": st.column_config.NumberColumn(format="%+.1f%%"),
-        "Destination Signal": st.column_config.TextColumn(width="medium"),
         "Hotel Signal": st.column_config.TextColumn(width="medium"),
         "Work Priority": st.column_config.TextColumn(width="large"),
     },

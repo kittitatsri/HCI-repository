@@ -245,7 +245,7 @@ def render_checkin_week(detail: pd.DataFrame, week_start: pd.Timestamp) -> None:
     display["View Change %"] = display["View Change %"] * 100
     st.dataframe(
         style_table(display[[
-            "Priority", "Hotel", "Destination", "Destination Signal", "This Week Views",
+            "Priority", "Hotel", "Destination", "This Week Views",
             "View Change %", "Work Priority",
         ]].head(200)),
         hide_index=True,
@@ -624,7 +624,6 @@ if not hotel_table.empty:
                 "Priority",
                 "Hotel",
                 "Destination",
-                "Destination Signal",
                 "Latest Views",
                 "View Change %",
                 "Why prioritized",
