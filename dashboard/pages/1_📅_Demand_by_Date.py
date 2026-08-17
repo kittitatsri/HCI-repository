@@ -202,10 +202,23 @@ def render_checkin_week(
     st.altair_chart(chart, width="stretch")
 
     st.subheader(f"Hotels to check — {week_start:%d %b}–{week_end:%d %b %Y}")
-    order = {"Critical surge": 5, "High increase": 4, "New demand": 3, "Stable": 2, "Declining": 1}
-    hotels["Signal Order"] = hotels["Destination Signal"].map(order).fillna(0)
+    hotel_order = {"Critical surge": 5, "High increase": 4, "New interest": 3, "Stable": 2, "Declining": 1}
+    destination_order = {"Critical surge": 5, "High increase": 4, "New demand": 3, "Stable": 2, "Declining": 1}
+    hotels["Hotel Signal"] = np.select(
+        [
+            hotels["Previous_Views"].isna(),
+            hotels["View_Change_Pct"].ge(0.25),
+            hotels["View_Change_Pct"].ge(0.10),
+            hotels["View_Change_Pct"].le(-0.10),
+        ],
+        ["New interest", "Critical surge", "High increase", "Declining"],
+        default="Stable",
+    )
+    hotels["Hotel Signal Order"] = hotels["Hotel Signal"].map(hotel_order).fillna(0)
+    hotels["Destination Signal Order"] = hotels["Destination Signal"].map(destination_order).fillna(0)
     hotels = hotels.sort_values(
-        ["Signal Order", "View_Change", "Current_Views"], ascending=[False, False, False]
+        ["Hotel Signal Order", "Current_Views", "Destination Signal Order", "View_Change"],
+        ascending=[False, False, False, False],
     ).reset_index(drop=True)
     hotels["Priority"] = np.arange(1, len(hotels) + 1)
     hotels["Next step"] = np.where(hotels["Action"], "Check inventory → parity", "Monitor")
@@ -565,11 +578,13 @@ st.caption(
     "The dashboard does not show inventory or parity results."
 )
 
-signal_order = {"Critical surge": 5, "High increase": 4, "New demand": 3, "Stable": 2, "Declining": 1}
-selected["Signal Order"] = selected["Destination Signal"].map(signal_order).fillna(0)
+hotel_signal_order = {"Critical surge": 5, "High increase": 4, "New interest": 3, "Stable": 2, "Declining": 1}
+destination_signal_order = {"Critical surge": 5, "High increase": 4, "New demand": 3, "Stable": 2, "Declining": 1}
+selected["Hotel Signal Order"] = selected["Hotel Signal"].map(hotel_signal_order).fillna(0)
+selected["Destination Signal Order"] = selected["Destination Signal"].map(destination_signal_order).fillna(0)
 selected = selected.sort_values(
-    ["Signal Order", "View_Change", "view_volume"],
-    ascending=[False, False, False],
+    ["Hotel Signal Order", "view_volume", "Destination Signal Order", "View_Change"],
+    ascending=[False, False, False, False],
 ).reset_index(drop=True)
 selected["Priority"] = np.arange(1, len(selected) + 1)
 
