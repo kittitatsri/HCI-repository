@@ -140,7 +140,6 @@ def style_table(frame: pd.DataFrame) -> pd.io.formats.style.Styler:
         for column in frame.columns
         if column in {
             "Signal",
-            "Destination Demand Signal",
             "Destination Signal",
             "Hotel Signal",
             "Trend",
