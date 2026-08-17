@@ -218,7 +218,7 @@ def render_checkin_week(detail: pd.DataFrame, week_start: pd.Timestamp) -> None:
     hotels["Destination Signal Order"] = hotels["Destination Signal"].map(destination_order).fillna(0)
     hotels["Has Views"] = hotels["Current_Views"].gt(0)
     hotels = hotels.sort_values(
-        ["Has Views", "Hotel Signal Order", "Current_Views", "Destination Signal Order", "View_Change"],
+        ["Has Views", "Current_Views", "Hotel Signal Order", "Destination Signal Order", "View_Change"],
         ascending=[False, False, False, False, False],
     ).reset_index(drop=True)
     hotels["Priority"] = np.arange(1, len(hotels) + 1)
@@ -550,7 +550,7 @@ with dates_col:
 
 st.subheader(f"Hotels to check — {selected_ts:%d %b %Y}")
 st.caption(
-    f"Prioritized by destination search demand and hotel-specific views versus the {comparison_label}. "
+    f"Ranked first by latest hotel views; demand signals are compared with the {comparison_label}. "
     "Inventory and parity are checked outside HCI."
 )
 
@@ -570,7 +570,7 @@ selected_detail["Hotel Signal Order"] = selected_detail["Hotel Signal"].map(hote
 selected_detail["Destination Signal Order"] = selected_detail["Destination Signal"].map(destination_signal_order).fillna(0)
 selected_detail["Has Views"] = selected_detail["view_volume"].gt(0)
 hotel_table = selected_detail.sort_values(
-    ["Has Views", "Hotel Signal Order", "view_volume", "Destination Signal Order", "View_Change", "ProductName"],
+    ["Has Views", "view_volume", "Hotel Signal Order", "Destination Signal Order", "View_Change", "ProductName"],
     ascending=[False, False, False, False, False, True],
 ).head(12).copy()
 hotel_table["Priority"] = np.arange(1, len(hotel_table) + 1)

@@ -218,7 +218,7 @@ def render_checkin_week(
     hotels["Destination Signal Order"] = hotels["Destination Signal"].map(destination_order).fillna(0)
     hotels["Has Views"] = hotels["Current_Views"].gt(0)
     hotels = hotels.sort_values(
-        ["Has Views", "Hotel Signal Order", "Current_Views", "Destination Signal Order", "View_Change"],
+        ["Has Views", "Current_Views", "Hotel Signal Order", "Destination Signal Order", "View_Change"],
         ascending=[False, False, False, False, False],
     ).reset_index(drop=True)
     hotels["Priority"] = np.arange(1, len(hotels) + 1)
@@ -594,7 +594,7 @@ st.dataframe(
 
 st.subheader(f"Hotels to check — {selected_ts:%d %b %Y}")
 st.caption(
-    f"Destination searches and hotel views are compared with the {comparison_label}. "
+    f"Ranked first by latest hotel views; demand signals are compared with the {comparison_label}. "
     "The dashboard does not show inventory or parity results."
 )
 
@@ -604,7 +604,7 @@ selected["Hotel Signal Order"] = selected["Hotel Signal"].map(hotel_signal_order
 selected["Destination Signal Order"] = selected["Destination Signal"].map(destination_signal_order).fillna(0)
 selected["Has Views"] = selected["view_volume"].gt(0)
 selected = selected.sort_values(
-    ["Has Views", "Hotel Signal Order", "view_volume", "Destination Signal Order", "View_Change"],
+    ["Has Views", "view_volume", "Hotel Signal Order", "Destination Signal Order", "View_Change"],
     ascending=[False, False, False, False, False],
 ).reset_index(drop=True)
 selected["Priority"] = np.arange(1, len(selected) + 1)
