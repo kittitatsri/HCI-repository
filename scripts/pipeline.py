@@ -436,8 +436,16 @@ def build_demand_summary(demand: pd.DataFrame) -> pd.DataFrame:
     ordered["Status_Modified"] = ordered["check_status"].eq("modify")
 
     latest_by_checkin = ordered.drop_duplicates(keys, keep="last")
+    # ProductID is the stable hotel key. Hotel names can change between exports,
+    # so select the newest name instead of grouping one ProductID into multiple
+    # summary rows under its historical names.
+    latest_names = (
+        ordered.sort_values(["ProductID", "snapshot_at"])
+        .drop_duplicates("ProductID", keep="last")
+        [["ProductID", "ProductName"]]
+    )
     current = (
-        latest_by_checkin.groupby(["ProductID", "ProductName"], as_index=False)
+        latest_by_checkin.groupby("ProductID", as_index=False)
         .agg(
             Current_Hotness=("hotness_score", "mean"),
             Peak_Hotness=("hotness_score", "max"),
@@ -449,7 +457,7 @@ def build_demand_summary(demand: pd.DataFrame) -> pd.DataFrame:
         )
     )
     movement = (
-        ordered.groupby(["ProductID", "ProductName"], as_index=False)
+        ordered.groupby("ProductID", as_index=False)
         .agg(
             Observed_View_Increase=("View_Increment", "sum"),
             Modification_Count=("Status_Modified", "sum"),
@@ -457,7 +465,7 @@ def build_demand_summary(demand: pd.DataFrame) -> pd.DataFrame:
     )
     modified = (
         ordered.loc[ordered["Status_Modified"]]
-        .groupby(["ProductID", "ProductName"], as_index=False)["snapshot_at"]
+        .groupby("ProductID", as_index=False)["snapshot_at"]
         .max()
         .rename(columns={"snapshot_at": "Last_Modified_At"})
     )
@@ -467,8 +475,9 @@ def build_demand_summary(demand: pd.DataFrame) -> pd.DataFrame:
         [["ProductID", "checkin_date"]]
         .rename(columns={"checkin_date": "Peak_CheckIn_Date"})
     )
-    summary = current.merge(movement, on=["ProductID", "ProductName"], validate="one_to_one")
-    summary = summary.merge(modified, on=["ProductID", "ProductName"], how="left", validate="one_to_one")
+    summary = current.merge(latest_names, on="ProductID", validate="one_to_one")
+    summary = summary.merge(movement, on="ProductID", validate="one_to_one")
+    summary = summary.merge(modified, on="ProductID", how="left", validate="one_to_one")
     summary = summary.merge(peak_dates, on="ProductID", how="left", validate="one_to_one")
     summary["Demand_Score"] = (
         summary["Current_Hotness"].fillna(0) * 40
