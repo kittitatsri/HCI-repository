@@ -561,6 +561,7 @@ st.subheader("Snapshot-week demand change" if view_mode == "Snapshot Week" else 
 daily_display = filtered_daily.rename(
     columns={
         "checkin_date": "Check-in Date",
+        "Signal": "Destination Demand Signal",
         "Latest_Searches": "Latest Searches",
         "Change_Pct": "Change %",
         "Hotels_Rising": "Hotels with Rising Views",
@@ -572,7 +573,7 @@ st.dataframe(
     style_table(daily_display[
         [
             "Check-in Date",
-            "Signal",
+            "Destination Demand Signal",
             "Latest Searches",
             "Change %",
             "Hotels with Rising Views",
