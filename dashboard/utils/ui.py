@@ -105,7 +105,13 @@ def style_table(frame: pd.DataFrame) -> pd.io.formats.style.Styler:
             "not live": ("#fef9c3", "#854d0e"),
         }.get(label)
         if colors is None:
-            if label.startswith("check inventory") or label.startswith("validate demand"):
+            if label.startswith("↑"):
+                colors = ("#dcfce7", "#15803d")
+            elif label.startswith("↓"):
+                colors = ("#fee2e2", "#b91c1c")
+            elif label.startswith("→"):
+                colors = ("#f1f5f9", "#64748b")
+            elif label.startswith("check inventory") or label.startswith("validate demand"):
                 colors = ("#ffedd5", "#c2410c")
             elif label in {"monitor", "none"}:
                 colors = ("#dcfce7", "#15803d")
@@ -136,6 +142,7 @@ def style_table(frame: pd.DataFrame) -> pd.io.formats.style.Styler:
             "Signal",
             "Destination Signal",
             "Hotel Signal",
+            "Trend",
             "Demand Level",
             "Status",
             "Agoda Status",

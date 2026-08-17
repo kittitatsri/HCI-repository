@@ -216,9 +216,10 @@ def render_checkin_week(
     )
     hotels["Hotel Signal Order"] = hotels["Hotel Signal"].map(hotel_order).fillna(0)
     hotels["Destination Signal Order"] = hotels["Destination Signal"].map(destination_order).fillna(0)
+    hotels["Has Views"] = hotels["Current_Views"].gt(0)
     hotels = hotels.sort_values(
-        ["Hotel Signal Order", "Current_Views", "Destination Signal Order", "View_Change"],
-        ascending=[False, False, False, False],
+        ["Has Views", "Hotel Signal Order", "Current_Views", "Destination Signal Order", "View_Change"],
+        ascending=[False, False, False, False, False],
     ).reset_index(drop=True)
     hotels["Priority"] = np.arange(1, len(hotels) + 1)
     hotels["Next step"] = np.where(hotels["Action"], "Check inventory → parity", "Monitor")
@@ -521,19 +522,37 @@ with destination_col:
         selected.groupby("Destination", as_index=False)
         .agg(
             Searches=("Destination_Searches", "first"),
+            Previous_Searches=("Previous_Destination_Searches", "first"),
             Views=("view_volume", "sum"),
             Hotels=("ProductID", "nunique"),
         )
         .sort_values(["Searches", "Views"], ascending=False)
         .head(8)
     )
+    destination_rank["Search Change %"] = np.where(
+        destination_rank["Previous_Searches"].gt(0),
+        (destination_rank["Searches"] - destination_rank["Previous_Searches"])
+        / destination_rank["Previous_Searches"] * 100,
+        np.nan,
+    )
+    destination_rank["Trend"] = np.select(
+        [
+            destination_rank["Search Change %"].gt(0),
+            destination_rank["Search Change %"].lt(0),
+            destination_rank["Search Change %"].eq(0),
+        ],
+        ["↑ More", "↓ Less", "→ Same"],
+        default="New",
+    )
+    destination_rank = destination_rank.drop(columns="Previous_Searches")
     st.dataframe(
-        style_table(destination_rank),
+        style_table(destination_rank[["Destination", "Searches", "Trend", "Search Change %", "Views", "Hotels"]]),
         hide_index=True,
         width="stretch",
         height=354,
         column_config={
             "Searches": st.column_config.NumberColumn(format="localized"),
+            "Search Change %": st.column_config.NumberColumn(format="%+.1f%%"),
             "Views": st.column_config.NumberColumn(format="localized"),
         },
     )
@@ -582,9 +601,10 @@ hotel_signal_order = {"Critical surge": 5, "High increase": 4, "New interest": 3
 destination_signal_order = {"Critical surge": 5, "High increase": 4, "New demand": 3, "Stable": 2, "Declining": 1}
 selected["Hotel Signal Order"] = selected["Hotel Signal"].map(hotel_signal_order).fillna(0)
 selected["Destination Signal Order"] = selected["Destination Signal"].map(destination_signal_order).fillna(0)
+selected["Has Views"] = selected["view_volume"].gt(0)
 selected = selected.sort_values(
-    ["Hotel Signal Order", "view_volume", "Destination Signal Order", "View_Change"],
-    ascending=[False, False, False, False],
+    ["Has Views", "Hotel Signal Order", "view_volume", "Destination Signal Order", "View_Change"],
+    ascending=[False, False, False, False, False],
 ).reset_index(drop=True)
 selected["Priority"] = np.arange(1, len(selected) + 1)
 

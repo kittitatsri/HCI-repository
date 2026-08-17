@@ -216,9 +216,10 @@ def render_checkin_week(detail: pd.DataFrame, week_start: pd.Timestamp) -> None:
     )
     hotels["Hotel Signal Order"] = hotels["Hotel Signal"].map(hotel_order).fillna(0)
     hotels["Destination Signal Order"] = hotels["Destination Signal"].map(destination_order).fillna(0)
+    hotels["Has Views"] = hotels["Current_Views"].gt(0)
     hotels = hotels.sort_values(
-        ["Hotel Signal Order", "Current_Views", "Destination Signal Order", "View_Change"],
-        ascending=[False, False, False, False],
+        ["Has Views", "Hotel Signal Order", "Current_Views", "Destination Signal Order", "View_Change"],
+        ascending=[False, False, False, False, False],
     ).reset_index(drop=True)
     hotels["Priority"] = np.arange(1, len(hotels) + 1)
     hotels["Next step"] = np.where(hotels["Action"], "Check inventory → parity", "Monitor")
@@ -567,9 +568,10 @@ hotel_signal_order = {"Critical surge": 5, "High increase": 4, "New interest": 3
 destination_signal_order = {"Critical surge": 5, "High increase": 4, "New demand": 3, "Stable": 2, "Declining": 1}
 selected_detail["Hotel Signal Order"] = selected_detail["Hotel Signal"].map(hotel_signal_order).fillna(0)
 selected_detail["Destination Signal Order"] = selected_detail["Destination Signal"].map(destination_signal_order).fillna(0)
+selected_detail["Has Views"] = selected_detail["view_volume"].gt(0)
 hotel_table = selected_detail.sort_values(
-    ["Hotel Signal Order", "view_volume", "Destination Signal Order", "View_Change", "ProductName"],
-    ascending=[False, False, False, False, True],
+    ["Has Views", "Hotel Signal Order", "view_volume", "Destination Signal Order", "View_Change", "ProductName"],
+    ascending=[False, False, False, False, False, True],
 ).head(12).copy()
 hotel_table["Priority"] = np.arange(1, len(hotel_table) + 1)
 if not hotel_table.empty:
