@@ -105,7 +105,15 @@ def style_table(frame: pd.DataFrame) -> pd.io.formats.style.Styler:
             "not live": ("#fef9c3", "#854d0e"),
         }.get(label)
         if colors is None:
-            if label.startswith("↑"):
+            if label.startswith("urgent"):
+                colors = ("#fee2e2", "#b91c1c")
+            elif label.startswith("high "):
+                colors = ("#ffedd5", "#c2410c")
+            elif label.startswith("medium"):
+                colors = ("#dbeafe", "#1d4ed8")
+            elif label.startswith("routine"):
+                colors = ("#f1f5f9", "#64748b")
+            elif label.startswith("↑"):
                 colors = ("#dcfce7", "#15803d")
             elif label.startswith("↓"):
                 colors = ("#fee2e2", "#b91c1c")
@@ -148,6 +156,7 @@ def style_table(frame: pd.DataFrame) -> pd.io.formats.style.Styler:
             "Agoda Status",
             "Ctrip Status",
             "Next step",
+            "Work Priority",
             "Next Action",
         }
     ]

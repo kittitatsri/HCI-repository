@@ -222,7 +222,19 @@ def render_checkin_week(
         ascending=[False, False, False, False, False],
     ).reset_index(drop=True)
     hotels["Priority"] = np.arange(1, len(hotels) + 1)
-    hotels["Next step"] = np.where(hotels["Action"], "Check inventory → parity", "Monitor")
+    high_views = hotels["Current_Views"].gt(0) & hotels["Current_Views"].ge(
+        hotels["Current_Views"].quantile(0.80)
+    )
+    rising_views = hotels["View_Change"].gt(0)
+    hotels["Work Priority"] = np.select(
+        [high_views & rising_views, high_views, rising_views],
+        [
+            "Urgent — high views and rising",
+            "High — high views, even if stable",
+            "Medium — lower views but rising",
+        ],
+        default="Routine — low or zero views without growth",
+    )
     display = hotels.rename(
         columns={"ProductName": "Hotel", "Current_Views": "This Week Views", "View_Change_Pct": "View Change %"}
     )
@@ -230,7 +242,7 @@ def render_checkin_week(
     st.dataframe(
         style_table(display[[
             "Priority", "Hotel", "Destination", "Destination Signal", "This Week Views",
-            "View Change %", "Next step",
+            "View Change %", "Work Priority",
         ]].head(200)),
         hide_index=True,
         width="stretch",
@@ -608,21 +620,19 @@ selected = selected.sort_values(
     ascending=[False, False, False, False, False],
 ).reset_index(drop=True)
 selected["Priority"] = np.arange(1, len(selected) + 1)
-
-
-def next_step(row: pd.Series) -> str:
-    if row["Destination Signal"] == "Critical surge" and row["View_Change"] > 0:
-        return "Check inventory now → parity"
-    if row["Destination Signal"] in ["High increase", "New demand"] and row["View_Change"] > 0:
-        return "Check inventory → parity"
-    if row["Demand Level"] in ["Very High", "High"]:
-        return "Check inventory → parity"
-    if row["Hotel Signal"] == "Declining":
-        return "Lower priority"
-    return "Monitor"
-
-
-selected["Next step"] = selected.apply(next_step, axis=1)
+high_views = selected["view_volume"].gt(0) & selected["view_volume"].ge(
+    selected["view_volume"].quantile(0.80)
+)
+rising_views = selected["View_Change"].gt(0)
+selected["Work Priority"] = np.select(
+    [high_views & rising_views, high_views, rising_views],
+    [
+        "Urgent — high views and rising",
+        "High — high views, even if stable",
+        "Medium — lower views but rising",
+    ],
+    default="Routine — low or zero views without growth",
+)
 
 display = selected.rename(
     columns={
@@ -638,7 +648,7 @@ display_columns = [
     "Latest Views",
     "View Change %",
     "Hotel Signal",
-    "Next step",
+    "Work Priority",
 ]
 display["View Change %"] = display["View Change %"] * 100
 st.dataframe(
@@ -652,7 +662,7 @@ st.dataframe(
         "View Change %": st.column_config.NumberColumn(format="%+.1f%%"),
         "Destination Signal": st.column_config.TextColumn(width="medium"),
         "Hotel Signal": st.column_config.TextColumn(width="medium"),
-        "Next step": st.column_config.TextColumn(width="medium"),
+        "Work Priority": st.column_config.TextColumn(width="large"),
     },
 )
 

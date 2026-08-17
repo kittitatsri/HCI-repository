@@ -222,7 +222,19 @@ def render_checkin_week(detail: pd.DataFrame, week_start: pd.Timestamp) -> None:
         ascending=[False, False, False, False, False],
     ).reset_index(drop=True)
     hotels["Priority"] = np.arange(1, len(hotels) + 1)
-    hotels["Next step"] = np.where(hotels["Action"], "Check inventory → parity", "Monitor")
+    high_views = hotels["Current_Views"].gt(0) & hotels["Current_Views"].ge(
+        hotels["Current_Views"].quantile(0.80)
+    )
+    rising_views = hotels["View_Change"].gt(0)
+    hotels["Work Priority"] = np.select(
+        [high_views & rising_views, high_views, rising_views],
+        [
+            "Urgent — high views and rising",
+            "High — high views, even if stable",
+            "Medium — lower views but rising",
+        ],
+        default="Routine — low or zero views without growth",
+    )
     display = hotels.rename(
         columns={
             "ProductName": "Hotel",
@@ -234,7 +246,7 @@ def render_checkin_week(detail: pd.DataFrame, week_start: pd.Timestamp) -> None:
     st.dataframe(
         style_table(display[[
             "Priority", "Hotel", "Destination", "Destination Signal", "This Week Views",
-            "View Change %", "Next step",
+            "View Change %", "Work Priority",
         ]].head(200)),
         hide_index=True,
         width="stretch",
@@ -591,7 +603,17 @@ if not hotel_table.empty:
         ["Destination rising + hotel views rising", "High hotel views"],
         default="Hotel interest to monitor",
     )
-    hotel_table["Next step"] = "Check inventory → parity"
+    high_views = hotel_table["view_volume"].gt(0) & hotel_table["view_volume"].ge(hotel_q80)
+    rising_views = hotel_table["View_Change"].gt(0)
+    hotel_table["Work Priority"] = np.select(
+        [high_views & rising_views, high_views, rising_views],
+        [
+            "Urgent — high views and rising",
+            "High — high views, even if stable",
+            "Medium — lower views but rising",
+        ],
+        default="Routine — low or zero views without growth",
+    )
     hotel_table = hotel_table.rename(
         columns={"ProductName": "Hotel", "view_volume": "Latest Views"}
     )
@@ -606,7 +628,7 @@ if not hotel_table.empty:
                 "Latest Views",
                 "View Change %",
                 "Why prioritized",
-                "Next step",
+                "Work Priority",
             ]
         ]),
         hide_index=True,
@@ -616,7 +638,7 @@ if not hotel_table.empty:
             "Priority": st.column_config.NumberColumn("Priority", format="%d", width="small"),
             "Latest Views": st.column_config.NumberColumn("Latest Views", format="localized"),
             "View Change %": st.column_config.NumberColumn("View Change %", format="%+.1f%%"),
-            "Next step": st.column_config.TextColumn("Next step", width="medium"),
+            "Work Priority": st.column_config.TextColumn("Work Priority", width="large"),
         },
     )
 else:
