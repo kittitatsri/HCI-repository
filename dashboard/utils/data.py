@@ -95,20 +95,29 @@ def build_hotel_checkin_trend(demand: pd.DataFrame, product_id: int) -> pd.DataF
     frame["ProductID"] = pd.to_numeric(frame["ProductID"], errors="coerce").astype("Int64")
     frame["view_volume"] = pd.to_numeric(frame["view_volume"], errors="coerce").fillna(0)
     frame["search_volume"] = pd.to_numeric(frame["search_volume"], errors="coerce").fillna(0)
-    frame = frame[
+    hotel_frame = frame[
         frame["ProductID"].eq(product_id)
         & frame["snapshot_at"].notna()
         & frame["checkin_date"].notna()
     ].copy()
-    if frame.empty:
+    if hotel_frame.empty:
         return pd.DataFrame(columns=["checkin_date", "Destination Searches", "Hotel Views"])
 
+    destination = hotel_frame["Destination"].dropna().astype(str).iloc[-1]
+    destination_frame = frame[
+        frame["Destination"].astype(str).eq(destination)
+        & frame["snapshot_at"].notna()
+        & frame["checkin_date"].notna()
+    ].copy()
     timestamps = frame["snapshot_at"].drop_duplicates().sort_values()
     batches = timestamps.diff().dt.total_seconds().fillna(301).gt(300).cumsum()
     batch_map = pd.DataFrame({"snapshot_at": timestamps, "Observation_Batch": batches})
-    frame = frame.merge(batch_map, on="snapshot_at", how="left", validate="many_to_one")
+    hotel_frame = hotel_frame.merge(batch_map, on="snapshot_at", how="left", validate="many_to_one")
+    destination_frame = destination_frame.merge(
+        batch_map, on="snapshot_at", how="left", validate="many_to_one"
+    )
     interval = (
-        frame.sort_values(["Observation_Batch", "checkin_date", "snapshot_at"])
+        hotel_frame.sort_values(["Observation_Batch", "checkin_date", "snapshot_at"])
         .drop_duplicates(["Observation_Batch", "checkin_date"], keep="last")
     )
     views = (
@@ -118,7 +127,9 @@ def build_hotel_checkin_trend(demand: pd.DataFrame, product_id: int) -> pd.DataF
         .sort_values("checkin_date")
     )
     searches = (
-        frame.groupby(["Observation_Batch", "checkin_date"], as_index=False)["search_volume"]
+        destination_frame.groupby(
+            ["Observation_Batch", "checkin_date"], as_index=False
+        )["search_volume"]
         .median()
         .groupby("checkin_date", as_index=False)["search_volume"]
         .sum()

@@ -292,7 +292,7 @@ with chart_col:
         .mark_line(point=True, strokeWidth=2.5)
         .encode(
             x=alt.X("checkin_date:T", title=None, axis=alt.Axis(format="%d %b", labelAngle=-35)),
-            y=alt.Y("Volume:Q", title="Observed value", axis=alt.Axis(format="~s")),
+            y=alt.Y("Volume:Q", title=None, axis=alt.Axis(format="~s")),
             color=alt.Color("Metric:N", title=None, scale=alt.Scale(
                 domain=["Destination Searches", "Hotel Views"], range=["#2563eb", "#16a34a"]
             )),
@@ -302,15 +302,11 @@ with chart_col:
                 alt.Tooltip("Volume:Q", title="Observed volume", format=",.0f"),
             ],
         )
-        .properties(height=315)
+        .properties(height=155)
     )
-    selected_rule = (
-        alt.Chart(pd.DataFrame({"checkin_date": [selected_ts]}))
-        .mark_rule(color="#f59e0b", strokeWidth=2, strokeDash=[5, 4])
-        .encode(x="checkin_date:T")
-    )
-    st.altair_chart(lines + selected_rule, width="stretch")
-    st.caption("Blue is destination search context; green is this hotel’s views. Y-axis and hover show actual observed values.")
+    chart = lines.facet(row=alt.Row("Metric:N", title=None)).resolve_scale(y="independent")
+    st.altair_chart(chart, width="stretch")
+    st.caption("Destination searches use all hotels in the destination. Hotel views use only this hotel. Each panel has its own actual-value scale.")
 
 with why_col:
     st.subheader("Why prioritized")
