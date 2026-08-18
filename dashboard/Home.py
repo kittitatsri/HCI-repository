@@ -625,6 +625,7 @@ with map_col:
             "Very Low": [134, 239, 172, 150],
         }
         map_data["Color"] = map_data["Demand Level"].map(colors)
+        map_data["Radius"] = np.sqrt(map_data["Searches"].clip(lower=0) + 1) * 6500
         deck = pdk.Deck(
             map_style="light",
             initial_view_state=pdk.ViewState(
@@ -649,7 +650,7 @@ with map_col:
                     data=map_data,
                     get_position="[Longitude, Latitude]",
                     get_fill_color="Color",
-                    get_radius="sqrt(Searches + 1) * 6500",
+                    get_radius="Radius",
                     radius_min_pixels=5,
                     radius_max_pixels=18,
                     pickable=True,
