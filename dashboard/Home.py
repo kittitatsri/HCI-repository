@@ -16,6 +16,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from dashboard.utils.data import (
+    build_checkin_date_trend,
     build_weekly_comparison,
     clear_data_cache,
     demand_source_path,
@@ -429,6 +430,16 @@ if destinations:
     trend_detail = trend_detail[trend_detail["Destination"].isin(destinations)]
 
 selected_daily = build_daily_market(trend_detail)
+if view_mode == "Daily":
+    history_trend = build_checkin_date_trend(load_demand())
+    if destinations:
+        history_trend = history_trend[history_trend["Destination"].isin(destinations)]
+    selected_daily_trend = (
+        history_trend.groupby("checkin_date", as_index=False)["Searches"].sum()
+        .sort_values("checkin_date")
+    )
+else:
+    selected_daily_trend = selected_daily
 selected_row = selected_daily[selected_daily["checkin_date"].eq(selected_ts)]
 selected_destinations = selected_detail.drop_duplicates(["Destination", "checkin_date"]).copy()
 selected_searches = float(selected_destinations["Destination_Searches"].sum())
@@ -530,7 +541,7 @@ chart_col, dates_col = st.columns([2.15, 1])
 with chart_col:
     st.subheader("Destination search trend")
     base = (
-        alt.Chart(selected_daily)
+        alt.Chart(selected_daily_trend)
         .mark_line(point=True, strokeWidth=2.5, color="#2563eb")
         .encode(
             x=alt.X("checkin_date:T", title=None, axis=alt.Axis(format="%d %b", labelAngle=-35)),

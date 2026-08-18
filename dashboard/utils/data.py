@@ -49,6 +49,31 @@ def iso_week_options(demand: pd.DataFrame) -> list[tuple[str, pd.Timestamp]]:
 
 
 @st.cache_data(show_spinner=False)
+def build_checkin_date_trend(demand: pd.DataFrame) -> pd.DataFrame:
+    """Aggregate all stored interval searches by destination and check-in date."""
+    frame = demand.copy()
+    frame["snapshot_at"] = pd.to_datetime(frame["snapshot_at"], errors="coerce")
+    frame["checkin_date"] = pd.to_datetime(frame["checkin_date"], errors="coerce").dt.normalize()
+    frame["search_volume"] = pd.to_numeric(frame["search_volume"], errors="coerce")
+    frame = frame.dropna(subset=["snapshot_at", "checkin_date", "Destination"])
+    timestamps = frame["snapshot_at"].drop_duplicates().sort_values()
+    batches = timestamps.diff().dt.total_seconds().fillna(301).gt(300).cumsum()
+    batch_map = pd.DataFrame({"snapshot_at": timestamps, "Observation_Batch": batches})
+    frame = frame.merge(batch_map, on="snapshot_at", how="left", validate="many_to_one")
+    interval = (
+        frame.groupby(
+            ["Observation_Batch", "Destination", "checkin_date"], as_index=False
+        )["search_volume"]
+        .median()
+    )
+    return (
+        interval.groupby(["Destination", "checkin_date"], as_index=False)["search_volume"]
+        .sum()
+        .rename(columns={"search_volume": "Searches"})
+    )
+
+
+@st.cache_data(show_spinner=False)
 def build_weekly_comparison(demand: pd.DataFrame, week_start: pd.Timestamp) -> pd.DataFrame:
     """Compare summed demand intervals in one ISO snapshot week with the prior week."""
     frame = demand.copy()
