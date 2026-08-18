@@ -544,38 +544,49 @@ k4.metric("Hotels with rising views", f"{rising_hotels:,} of {active_hotels:,}")
 k5.metric("Hotels requiring action", f"{action_hotels:,}")
 
 
-chart_col, dates_col = st.columns([2.15, 1])
-with chart_col:
-    st.subheader("Searches and views by check-in date")
-    trend_long = selected_daily_trend.melt(
-        id_vars="checkin_date", value_vars=["Searches", "Views"],
-        var_name="Metric", value_name="Volume",
+st.subheader("Searches and views by check-in date")
+trend_long = selected_daily_trend.melt(
+    id_vars="checkin_date", value_vars=["Searches", "Views"],
+    var_name="Metric", value_name="Volume",
+)
+base = (
+    alt.Chart(trend_long)
+    .mark_line(point=True, strokeWidth=2.5)
+    .encode(
+        x=alt.X("checkin_date:T", title=None, axis=alt.Axis(format="%d %b", labelAngle=-35)),
+        y=alt.Y("Volume:Q", title="Observed value", axis=alt.Axis(format="~s")),
+        color=alt.Color("Metric:N", title=None, scale=alt.Scale(
+            domain=["Searches", "Views"], range=["#2563eb", "#16a34a"]
+        )),
+        tooltip=[
+            alt.Tooltip("checkin_date:T", title="Check-in", format="%d %b %Y"),
+            "Metric:N",
+            alt.Tooltip("Volume:Q", title="Observed volume", format=",.0f"),
+        ],
     )
-    base = (
-        alt.Chart(trend_long)
-        .mark_line(point=True, strokeWidth=2.5)
-        .encode(
-            x=alt.X("checkin_date:T", title=None, axis=alt.Axis(format="%d %b", labelAngle=-35)),
-            y=alt.Y("Volume:Q", title="Observed value", axis=alt.Axis(format="~s")),
-            color=alt.Color("Metric:N", title=None, scale=alt.Scale(
-                domain=["Searches", "Views"], range=["#2563eb", "#16a34a"]
-            )),
-            tooltip=[
-                alt.Tooltip("checkin_date:T", title="Check-in", format="%d %b %Y"),
-                "Metric:N",
-                alt.Tooltip("Volume:Q", title="Observed volume", format=",.0f"),
-            ],
-        )
-        .properties(height=310)
-    )
-    selected_rule = (
-        alt.Chart(pd.DataFrame({"checkin_date": [selected_ts]}))
-        .mark_rule(color="#f59e0b", strokeWidth=2, strokeDash=[5, 4])
-        .encode(x="checkin_date:T")
-    )
-    st.altair_chart(base + selected_rule, width="stretch")
-    st.caption("Y-axis shows actual observed searches and views. Hover over a point for the exact value.")
+    .properties(height=310)
+)
+selected_rule = (
+    alt.Chart(pd.DataFrame({"checkin_date": [selected_ts]}))
+    .mark_rule(color="#f59e0b", strokeWidth=2, strokeDash=[5, 4])
+    .encode(x="checkin_date:T")
+)
+st.altair_chart(base + selected_rule, width="stretch")
+st.caption("Y-axis shows actual observed searches and views. Hover over a point for the exact value.")
 
+
+map_searches = selected_destinations[["Destination", "Destination_Searches"]].rename(
+    columns={"Destination_Searches": "Searches"}
+)
+map_views = selected_detail.groupby("Destination", as_index=False)["view_volume"].sum().rename(
+    columns={"view_volume": "Views"}
+)
+coordinates = pd.read_csv(ROOT / "data" / "reference" / "thailand_destination_coordinates.csv")
+map_data = map_searches.merge(map_views, on="Destination", how="outer").merge(
+    coordinates, on="Destination", how="inner", validate="one_to_one"
+)
+map_data[["Searches", "Views"]] = map_data[["Searches", "Views"]].fillna(0)
+dates_col, map_col = st.columns([1, 2.25])
 with dates_col:
     st.subheader("Strong demand dates")
     strongest = daily.sort_values(["Searches", "checkin_date"], ascending=[False, True]).head(5)
@@ -588,94 +599,84 @@ with dates_col:
         )
     st.caption(f"{high_dates} check-in dates currently show high or very high portfolio demand.")
 
-
-st.subheader("Demand Heatmap (Thailand)")
-map_searches = selected_destinations[["Destination", "Destination_Searches"]].rename(
-    columns={"Destination_Searches": "Searches"}
-)
-map_views = selected_detail.groupby("Destination", as_index=False)["view_volume"].sum().rename(
-    columns={"view_volume": "Views"}
-)
-coordinates = pd.read_csv(ROOT / "data" / "reference" / "thailand_destination_coordinates.csv")
-map_data = map_searches.merge(map_views, on="Destination", how="outer").merge(
-    coordinates, on="Destination", how="inner", validate="one_to_one"
-)
-map_data[["Searches", "Views"]] = map_data[["Searches", "Views"]].fillna(0)
-if not map_data.empty:
-    positive = map_data.loc[map_data["Searches"].gt(0), "Searches"]
-    if positive.empty:
-        q20 = q50 = q75 = q90 = 0
+with map_col:
+    st.subheader("Demand Heatmap (Thailand)")
+    if not map_data.empty:
+        positive = map_data.loc[map_data["Searches"].gt(0), "Searches"]
+        if positive.empty:
+            q20 = q50 = q75 = q90 = 0
+        else:
+            q20, q50, q75, q90 = positive.quantile([0.20, 0.50, 0.75, 0.90])
+        map_data["Demand Level"] = np.select(
+            [
+                map_data["Searches"].ge(q90),
+                map_data["Searches"].ge(q75),
+                map_data["Searches"].ge(q50),
+                map_data["Searches"].ge(q20),
+            ],
+            ["Very High", "High", "Medium", "Low"],
+            default="Very Low",
+        )
+        colors = {
+            "Very High": [220, 38, 38, 210],
+            "High": [249, 115, 22, 200],
+            "Medium": [250, 204, 21, 190],
+            "Low": [34, 197, 94, 170],
+            "Very Low": [134, 239, 172, 150],
+        }
+        map_data["Color"] = map_data["Demand Level"].map(colors)
+        deck = pdk.Deck(
+            map_style="light",
+            initial_view_state=pdk.ViewState(
+                latitude=13.2, longitude=101.0, zoom=4.65, pitch=0, bearing=0
+            ),
+            layers=[
+                pdk.Layer(
+                    "HeatmapLayer",
+                    data=map_data,
+                    get_position="[Longitude, Latitude]",
+                    get_weight="Searches",
+                    radius_pixels=38,
+                    intensity=0.85,
+                    threshold=0.05,
+                    color_range=[
+                        [134, 239, 172], [34, 197, 94], [250, 204, 21],
+                        [249, 115, 22], [220, 38, 38],
+                    ],
+                ),
+                pdk.Layer(
+                    "ScatterplotLayer",
+                    data=map_data,
+                    get_position="[Longitude, Latitude]",
+                    get_fill_color="Color",
+                    get_radius="sqrt(Searches + 1) * 6500",
+                    radius_min_pixels=5,
+                    radius_max_pixels=18,
+                    pickable=True,
+                    stroked=True,
+                    get_line_color=[255, 255, 255, 210],
+                    line_width_min_pixels=1,
+                ),
+            ],
+            tooltip={
+                "html": "<b>{Destination}</b><br/>{Demand Level}<br/>Searches: {Searches}<br/>Hotel views: {Views}",
+                "style": {"backgroundColor": "#0f172a", "color": "white"},
+            },
+        )
+        st.markdown(
+            '<div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:6px;font-size:0.82rem;'
+            'font-weight:600;color:#475569"><span style="color:#dc2626">● Very High</span>'
+            '<span style="color:#f97316">● High</span><span style="color:#eab308">● Medium</span>'
+            '<span style="color:#22c55e">● Low</span><span style="color:#86efac">● Very Low</span></div>',
+            unsafe_allow_html=True,
+        )
+        st.pydeck_chart(deck, width="stretch", height=455)
+        st.caption(
+            "Colour = relative search demand · Circle size = search volume · "
+            "Hover for searches and hotel views."
+        )
     else:
-        q20, q50, q75, q90 = positive.quantile([0.20, 0.50, 0.75, 0.90])
-    map_data["Demand Level"] = np.select(
-        [
-            map_data["Searches"].ge(q90),
-            map_data["Searches"].ge(q75),
-            map_data["Searches"].ge(q50),
-            map_data["Searches"].ge(q20),
-        ],
-        ["Very High", "High", "Medium", "Low"],
-        default="Very Low",
-    )
-    colors = {
-        "Very High": [220, 38, 38, 210],
-        "High": [249, 115, 22, 200],
-        "Medium": [250, 204, 21, 190],
-        "Low": [34, 197, 94, 170],
-        "Very Low": [134, 239, 172, 150],
-    }
-    map_data["Color"] = map_data["Demand Level"].map(colors)
-    deck = pdk.Deck(
-        map_style="light",
-        initial_view_state=pdk.ViewState(
-            latitude=13.2, longitude=101.0, zoom=4.65, pitch=0, bearing=0
-        ),
-        layers=[
-            pdk.Layer(
-                "HeatmapLayer",
-                data=map_data,
-                get_position="[Longitude, Latitude]",
-                get_weight="Searches",
-                radius_pixels=55,
-                intensity=1.2,
-                threshold=0.03,
-                color_range=[
-                    [134, 239, 172], [34, 197, 94], [250, 204, 21],
-                    [249, 115, 22], [220, 38, 38],
-                ],
-            ),
-            pdk.Layer(
-                "ScatterplotLayer",
-                data=map_data,
-                get_position="[Longitude, Latitude]",
-                get_fill_color="Color",
-                get_radius=18000,
-                radius_min_pixels=4,
-                radius_max_pixels=13,
-                pickable=True,
-                stroked=True,
-                get_line_color=[255, 255, 255, 210],
-                line_width_min_pixels=1,
-            ),
-        ],
-        tooltip={
-            "html": "<b>{Destination}</b><br/>{Demand Level}<br/>Searches: {Searches}<br/>Hotel views: {Views}",
-            "style": {"backgroundColor": "#0f172a", "color": "white"},
-        },
-    )
-    st.pydeck_chart(deck, width="stretch", height=500)
-    st.markdown(
-        '<div style="display:flex;gap:18px;flex-wrap:wrap;font-size:0.85rem;color:#475569">'
-        '<span>🟥 Very High</span><span>🟧 High</span><span>🟨 Medium</span>'
-        '<span>🟩 Low</span><span style="color:#86efac">■</span><span>Very Low</span></div>',
-        unsafe_allow_html=True,
-    )
-    st.caption(
-        "Demand level is based on destination searches for the selected check-in date and filters. "
-        "Hover over a destination for searches and hotel views. Province coordinates: GeoNames."
-    )
-else:
-    st.info("No mapped destination demand is available for this date and filter selection.")
+        st.info("No mapped destination demand is available for this date and filter selection.")
 
 
 st.subheader(f"Hotels to check — {selected_ts:%d %b %Y}")
