@@ -396,7 +396,9 @@ elif view_mode == "Check-in Week":
     render_checkin_week(detail, pd.Timestamp(week_options[selected_label]))
     st.stop()
 else:
-    week_col.caption("Daily compares the latest demand state with the previous upload.")
+    week_col.caption(
+        "Daily compares summed intervals from the newest upload with an equally sized preceding window."
+    )
 
 available_dates = daily["checkin_date"].dt.date.tolist()
 today = date.today()
@@ -562,7 +564,7 @@ with dates_col:
 
 st.subheader(f"Hotels to check — {selected_ts:%d %b %Y}")
 st.caption(
-    f"Ranked first by latest hotel views; demand signals are compared with the {comparison_label}. "
+    f"Ranked first by observed hotel views in the comparison period; signals use the {comparison_label}. "
     "Inventory and parity are checked outside HCI."
 )
 
@@ -615,7 +617,7 @@ if not hotel_table.empty:
         default="Routine — low or zero views without growth",
     )
     hotel_table = hotel_table.rename(
-        columns={"ProductName": "Hotel", "view_volume": "Latest Views"}
+        columns={"ProductName": "Hotel", "view_volume": "Observed Views"}
     )
     hotel_table["View Change %"] = hotel_table["View Change %"] * 100
     st.dataframe(
@@ -624,7 +626,7 @@ if not hotel_table.empty:
                 "Priority",
                 "Hotel",
                 "Destination",
-                "Latest Views",
+                "Observed Views",
                 "View Change %",
                 "Why prioritized",
                 "Work Priority",
@@ -635,7 +637,7 @@ if not hotel_table.empty:
         height=455,
         column_config={
             "Priority": st.column_config.NumberColumn("Priority", format="%d", width="small"),
-            "Latest Views": st.column_config.NumberColumn("Latest Views", format="localized"),
+            "Observed Views": st.column_config.NumberColumn("Observed Views", format="localized"),
             "View Change %": st.column_config.NumberColumn("View Change %", format="%+.1f%%"),
             "Work Priority": st.column_config.TextColumn("Work Priority", width="large"),
         },

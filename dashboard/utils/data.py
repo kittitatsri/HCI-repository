@@ -50,7 +50,7 @@ def iso_week_options(demand: pd.DataFrame) -> list[tuple[str, pd.Timestamp]]:
 
 @st.cache_data(show_spinner=False)
 def build_weekly_comparison(demand: pd.DataFrame, week_start: pd.Timestamp) -> pd.DataFrame:
-    """Compare the last observed state in one ISO week with the prior ISO week."""
+    """Compare summed demand intervals in one ISO snapshot week with the prior week."""
     frame = demand.copy()
     frame["snapshot_at"] = pd.to_datetime(frame["snapshot_at"], errors="coerce")
     frame["checkin_date"] = pd.to_datetime(frame["checkin_date"], errors="coerce").dt.normalize()
@@ -73,36 +73,76 @@ def build_weekly_comparison(demand: pd.DataFrame, week_start: pd.Timestamp) -> p
         relevant["snapshot_at"].ge(selected_start), "latest", "previous"
     )
 
+    timestamps = relevant["snapshot_at"].drop_duplicates().sort_values()
+    batches = timestamps.diff().dt.total_seconds().fillna(301).gt(300).cumsum()
+    batch_map = pd.DataFrame({"snapshot_at": timestamps, "Observation_Batch": batches})
+    relevant = relevant.merge(batch_map, on="snapshot_at", how="left", validate="many_to_one")
+    interval_counts = relevant.groupby("period")["Observation_Batch"].nunique()
+    latest_count = int(interval_counts.get("latest", 0))
+    previous_count = int(interval_counts.get("previous", 0))
+    previous_scale = latest_count / previous_count if previous_count else np.nan
+
     hotel_keys = ["ProductID", "checkin_date"]
     hotel_rows = (
         relevant.dropna(subset=["ProductID"])
-        .sort_values(hotel_keys + ["snapshot_at"])
-        .drop_duplicates(["period"] + hotel_keys, keep="last")
+        .sort_values(["period", "Observation_Batch"] + hotel_keys + ["snapshot_at"])
+        .drop_duplicates(["period", "Observation_Batch"] + hotel_keys, keep="last")
     )
-    latest_hotels = hotel_rows[hotel_rows["period"].eq("latest")].copy()
-    previous_hotels = hotel_rows[hotel_rows["period"].eq("previous")][
-        hotel_keys + ["view_volume"]
-    ].rename(columns={"view_volume": "Previous_Views"})
+    metadata = (
+        hotel_rows[hotel_rows["period"].eq("latest")]
+        .sort_values(hotel_keys + ["snapshot_at"])
+        .drop_duplicates(hotel_keys, keep="last")
+        [hotel_keys + ["ProductName", "Destination", "snapshot_at", "check_status"]]
+    )
+    latest_hotels = (
+        hotel_rows[hotel_rows["period"].eq("latest")]
+        .groupby(hotel_keys, as_index=False)
+        .agg(
+            view_volume=("view_volume", "sum"),
+            hotness_score=("hotness_score", "mean"),
+            trend_momentum=("trend_momentum", "mean"),
+        )
+        .merge(metadata, on=hotel_keys, validate="one_to_one")
+    )
+    previous_hotels = (
+        hotel_rows[hotel_rows["period"].eq("previous")]
+        .groupby(hotel_keys, as_index=False)["view_volume"]
+        .sum()
+        .rename(columns={"view_volume": "Previous_Views"})
+    )
+    if pd.notna(previous_scale):
+        previous_hotels["Previous_Views"] *= previous_scale
     latest_hotels = latest_hotels.merge(
         previous_hotels, on=hotel_keys, how="left", validate="one_to_one"
     )
     latest_hotels["View_Change"] = latest_hotels["view_volume"] - latest_hotels["Previous_Views"]
 
     destination_keys = ["Destination", "checkin_date"]
-    destination_rows = (
+    destination_intervals = (
         relevant.dropna(subset=["Destination"])
-        .sort_values(destination_keys + ["snapshot_at"])
-        .drop_duplicates(["period"] + destination_keys, keep="last")
+        .groupby(["period", "Observation_Batch"] + destination_keys, as_index=False)
+        .agg(search_volume=("search_volume", "median"), snapshot_at=("snapshot_at", "max"))
     )
-    latest_destinations = destination_rows[destination_rows["period"].eq("latest")][
-        destination_keys + ["search_volume"]
-    ].rename(columns={"search_volume": "Destination_Searches"})
-    previous_destinations = destination_rows[destination_rows["period"].eq("previous")][
-        destination_keys + ["search_volume"]
-    ].rename(columns={"search_volume": "Previous_Destination_Searches"})
+    latest_destinations = (
+        destination_intervals[destination_intervals["period"].eq("latest")]
+        .groupby(destination_keys, as_index=False)
+        .agg(
+            Destination_Searches=("search_volume", "sum"),
+            Destination_Search_Snapshot=("snapshot_at", "max"),
+        )
+    )
+    previous_destinations = (
+        destination_intervals[destination_intervals["period"].eq("previous")]
+        .groupby(destination_keys, as_index=False)["search_volume"]
+        .sum()
+        .rename(columns={"search_volume": "Previous_Destination_Searches"})
+    )
+    if pd.notna(previous_scale):
+        previous_destinations["Previous_Destination_Searches"] *= previous_scale
     destinations = latest_destinations.merge(
         previous_destinations, on=destination_keys, how="left", validate="one_to_one"
     )
+    destinations["Previous_Destination_Search_Snapshot"] = selected_start - pd.Timedelta(seconds=1)
     destinations["Destination_Search_Change"] = (
         destinations["Destination_Searches"] - destinations["Previous_Destination_Searches"]
     )

@@ -316,7 +316,9 @@ elif view_mode == "Check-in Week":
     render_checkin_week(master, detail, pd.Timestamp(week_options[selected_label]))
     st.stop()
 else:
-    week_col.caption("Daily compares the latest demand state with the previous upload.")
+    week_col.caption(
+        "Daily compares summed intervals from the newest upload with an equally sized preceding window."
+    )
 
 available_dates = portfolio_daily["checkin_date"].dt.date.tolist()
 today = date.today()
@@ -574,7 +576,7 @@ daily_display = filtered_daily.rename(
     columns={
         "checkin_date": "Check-in Date",
         "Signal": "Destination Signal",
-        "Latest_Searches": "Latest Searches",
+        "Latest_Searches": "Observed Searches",
         "Change_Pct": "Change %",
         "Hotels_Rising": "Hotels with Rising Views",
         "Action_Hotels": "Action Hotels",
@@ -586,7 +588,7 @@ st.dataframe(
         [
             "Check-in Date",
             "Destination Signal",
-            "Latest Searches",
+            "Observed Searches",
             "Change %",
             "Hotels with Rising Views",
             "Action Hotels",
@@ -597,7 +599,7 @@ st.dataframe(
     height=320,
     column_config={
         "Check-in Date": st.column_config.DateColumn(format="DD MMM YYYY"),
-        "Latest Searches": st.column_config.NumberColumn(format="localized"),
+        "Observed Searches": st.column_config.NumberColumn(format="localized"),
         "Change %": st.column_config.NumberColumn(format="%+.1f%%"),
         "Hotels with Rising Views": st.column_config.NumberColumn(format="localized"),
         "Action Hotels": st.column_config.NumberColumn(format="localized"),
@@ -606,7 +608,7 @@ st.dataframe(
 
 st.subheader(f"Hotels to check — {selected_ts:%d %b %Y}")
 st.caption(
-    f"Ranked first by latest hotel views; demand signals are compared with the {comparison_label}. "
+    f"Ranked first by observed hotel views in the comparison period; signals use the {comparison_label}. "
     "The dashboard does not show inventory or parity results."
 )
 
@@ -637,14 +639,14 @@ selected["Work Priority"] = np.select(
 display = selected.rename(
     columns={
         "ProductName": "Hotel",
-        "view_volume": "Latest Views",
+        "view_volume": "Observed Views",
         "View Change %": "View Change %",
     }
 )
 display_columns = [
     "Priority",
     "Hotel",
-    "Latest Views",
+    "Observed Views",
     "View Change %",
     "Hotel Signal",
     "Work Priority",
@@ -657,7 +659,7 @@ st.dataframe(
     height=530,
     column_config={
         "Priority": st.column_config.NumberColumn(format="%d", width="small"),
-        "Latest Views": st.column_config.NumberColumn(format="localized"),
+        "Observed Views": st.column_config.NumberColumn(format="localized"),
         "View Change %": st.column_config.NumberColumn(format="%+.1f%%"),
         "Hotel Signal": st.column_config.TextColumn(width="medium"),
         "Work Priority": st.column_config.TextColumn(width="large"),

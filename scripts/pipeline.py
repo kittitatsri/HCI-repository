@@ -211,46 +211,102 @@ def prepare_demand(demand: pd.DataFrame) -> pd.DataFrame:
     return demand.dropna(subset=["ProductID", "ProductName"])
 
 
-def build_latest_demand_by_checkin(demand: pd.DataFrame) -> pd.DataFrame:
-    """Return one current cumulative demand record per hotel/check-in date."""
-    keys = ["ProductID", "checkin_date"]
-    latest = (
-        demand.dropna(subset=keys + ["snapshot_at"])
-        .sort_values(keys + ["snapshot_at"])
-        .drop_duplicates(keys, keep="last")
-        .copy()
+def _with_observation_batches(demand: pd.DataFrame) -> pd.DataFrame:
+    """Group near-identical crawler timestamps into one demand observation interval."""
+    frame = demand.drop(
+        columns=["Observation_Batch", "Observation_At"], errors="ignore"
+    ).dropna(subset=["snapshot_at"]).copy()
+    timestamps = frame["snapshot_at"].drop_duplicates().sort_values()
+    batches = timestamps.diff().dt.total_seconds().fillna(301).gt(300).cumsum()
+    batch_map = pd.DataFrame({"snapshot_at": timestamps, "Observation_Batch": batches})
+    frame = frame.merge(batch_map, on="snapshot_at", how="left", validate="many_to_one")
+    batch_times = frame.groupby("Observation_Batch")["snapshot_at"].transform("max")
+    frame["Observation_At"] = batch_times
+    return frame
+
+
+def select_interval_periods(
+    demand: pd.DataFrame, previous_demand: pd.DataFrame | None
+) -> tuple[pd.DataFrame, pd.DataFrame | None]:
+    """Select the newest uploaded intervals and an equally sized preceding baseline."""
+    current_all = _with_observation_batches(demand)
+    previous_all = (
+        _with_observation_batches(previous_demand)
+        if previous_demand is not None and not previous_demand.empty
+        else None
     )
-    return latest[
-        [
-            "ProductID",
-            "ProductName",
-            "Destination",
-            "checkin_date",
-            "snapshot_at",
-            "hotness_score",
-            "trend_momentum",
-            "search_volume",
-            "view_volume",
-            "check_status",
-        ]
-    ]
+
+    if previous_all is not None:
+        previous_timestamps = set(previous_all["snapshot_at"].dropna())
+        new_rows = current_all.loc[~current_all["snapshot_at"].isin(previous_timestamps)]
+    else:
+        new_rows = current_all.iloc[0:0]
+
+    if not new_rows.empty:
+        current_start = new_rows["snapshot_at"].min()
+        current_period = current_all[current_all["snapshot_at"].ge(current_start)].copy()
+        baseline_source = previous_all
+    else:
+        latest_day = current_all["snapshot_at"].max().normalize()
+        current_period = current_all[current_all["snapshot_at"].dt.normalize().eq(latest_day)].copy()
+        baseline_source = current_all[current_all["snapshot_at"].lt(latest_day)].copy()
+
+    interval_count = current_period["Observation_Batch"].nunique()
+    if baseline_source is None or baseline_source.empty or interval_count == 0:
+        return current_period, None
+    baseline_batches = (
+        baseline_source[["Observation_Batch", "Observation_At"]]
+        .drop_duplicates()
+        .sort_values("Observation_At")
+        .tail(interval_count)["Observation_Batch"]
+    )
+    baseline_period = baseline_source[
+        baseline_source["Observation_Batch"].isin(baseline_batches)
+    ].copy()
+    return current_period, baseline_period
+
+
+def build_latest_demand_by_checkin(demand: pd.DataFrame) -> pd.DataFrame:
+    """Sum interval views into one hotel/check-in record for the selected observation period."""
+    keys = ["ProductID", "checkin_date"]
+    interval = _with_observation_batches(demand)
+    interval = (
+        interval.dropna(subset=keys)
+        .sort_values(["Observation_Batch"] + keys + ["snapshot_at"])
+        .drop_duplicates(["Observation_Batch"] + keys, keep="last")
+    )
+    latest_metadata = (
+        interval.sort_values(keys + ["snapshot_at"])
+        .drop_duplicates(keys, keep="last")
+        [keys[0:1] + ["checkin_date", "ProductName", "Destination", "check_status"]]
+    )
+    aggregated = interval.groupby(keys, as_index=False).agg(
+        snapshot_at=("snapshot_at", "max"),
+        hotness_score=("hotness_score", "mean"),
+        trend_momentum=("trend_momentum", "mean"),
+        search_volume=("search_volume", "median"),
+        view_volume=("view_volume", "sum"),
+        Interval_Count=("Observation_Batch", "nunique"),
+    )
+    return aggregated.merge(latest_metadata, on=keys, validate="one_to_one")
 
 
 def build_latest_destination_demand(demand: pd.DataFrame) -> pd.DataFrame:
-    """Return one current destination-search record per destination/check-in date."""
+    """Sum one robust destination-search observation per interval and check-in date."""
     keys = ["Destination", "checkin_date"]
-    latest = (
-        demand.dropna(subset=keys + ["snapshot_at"])
-        .sort_values(keys + ["snapshot_at"])
-        .drop_duplicates(keys, keep="last")
-        .copy()
+    interval = _with_observation_batches(demand).dropna(subset=keys)
+    interval_search = (
+        interval.groupby(["Observation_Batch", "Observation_At"] + keys, as_index=False)
+        .agg(search_volume=("search_volume", "median"))
     )
-    return latest[
-        ["Destination", "checkin_date", "snapshot_at", "search_volume"]
-    ].rename(
+    destination = interval_search.groupby(keys, as_index=False).agg(
+        Destination_Search_Snapshot=("Observation_At", "max"),
+        Destination_Searches=("search_volume", "sum"),
+        Destination_Intervals=("Observation_Batch", "nunique"),
+    )
+    return destination.rename(
         columns={
-            "snapshot_at": "Destination_Search_Snapshot",
-            "search_volume": "Destination_Searches",
+            "Destination_Searches": "Destination_Searches",
         }
     )
 
@@ -328,6 +384,7 @@ def load_agoda_parity() -> pd.DataFrame:
 def build_hotel_date_funnel(
     demand: pd.DataFrame, previous_demand: pd.DataFrame | None = None
 ) -> pd.DataFrame:
+    current_interval_count = _with_observation_batches(demand)["Observation_Batch"].nunique()
     latest = build_latest_demand_by_checkin(demand)
     latest["checkin_date"] = latest["checkin_date"].dt.normalize()
     latest = latest.rename(columns={"search_volume": "Raw_Destination_Search"})
@@ -377,9 +434,17 @@ def build_hotel_date_funnel(
         np.nan,
     )
     if previous_demand is not None and not previous_demand.empty:
+        previous_interval_count = _with_observation_batches(previous_demand)[
+            "Observation_Batch"
+        ].nunique()
+        coverage_scale = (
+            current_interval_count / previous_interval_count if previous_interval_count else np.nan
+        )
         previous = build_latest_demand_by_checkin(previous_demand)[
             ["ProductID", "checkin_date", "view_volume"]
         ].rename(columns={"view_volume": "Previous_Views"})
+        if pd.notna(coverage_scale):
+            previous["Previous_Views"] *= coverage_scale
         previous["checkin_date"] = previous["checkin_date"].dt.normalize()
         funnel = funnel.merge(
             previous,
@@ -393,6 +458,8 @@ def build_hotel_date_funnel(
                 "Destination_Search_Snapshot": "Previous_Destination_Search_Snapshot",
             }
         )
+        if pd.notna(coverage_scale):
+            previous_destination["Previous_Destination_Searches"] *= coverage_scale
         previous_destination["checkin_date"] = previous_destination["checkin_date"].dt.normalize()
         funnel = funnel.merge(
             previous_destination,
@@ -425,17 +492,17 @@ def build_hotel_date_funnel(
 
 
 def build_demand_summary(demand: pd.DataFrame) -> pd.DataFrame:
-    keys = ["ProductID", "CheckInDate"]
-    ordered = demand.sort_values(keys + ["snapshot_at"]).copy()
-
-    # Hotel views are persistent cumulative counters. Positive differences
-    # describe new hotel interest observed within the loaded period.
-    ordered["View_Increment"] = (
-        ordered.groupby(keys)["view_volume"].diff().fillna(0).clip(lower=0)
-    )
+    keys = ["ProductID", "checkin_date"]
+    ordered = _with_observation_batches(demand).sort_values(keys + ["snapshot_at"]).copy()
+    ordered = ordered.drop_duplicates(["Observation_Batch"] + keys, keep="last")
     ordered["Status_Modified"] = ordered["check_status"].eq("modify")
 
-    latest_by_checkin = ordered.drop_duplicates(keys, keep="last")
+    interval_by_checkin = ordered.groupby(keys, as_index=False).agg(
+        hotness_score=("hotness_score", "mean"),
+        trend_momentum=("trend_momentum", "mean"),
+        view_volume=("view_volume", "sum"),
+        snapshot_at=("snapshot_at", "max"),
+    )
     # ProductID is the stable hotel key. Hotel names can change between exports,
     # so select the newest name instead of grouping one ProductID into multiple
     # summary rows under its historical names.
@@ -445,7 +512,7 @@ def build_demand_summary(demand: pd.DataFrame) -> pd.DataFrame:
         [["ProductID", "ProductName"]]
     )
     current = (
-        latest_by_checkin.groupby("ProductID", as_index=False)
+        interval_by_checkin.groupby("ProductID", as_index=False)
         .agg(
             Current_Hotness=("hotness_score", "mean"),
             Peak_Hotness=("hotness_score", "max"),
@@ -459,7 +526,7 @@ def build_demand_summary(demand: pd.DataFrame) -> pd.DataFrame:
     movement = (
         ordered.groupby("ProductID", as_index=False)
         .agg(
-            Observed_View_Increase=("View_Increment", "sum"),
+            Active_View_Intervals=("view_volume", lambda values: int(values.gt(0).sum())),
             Modification_Count=("Status_Modified", "sum"),
         )
     )
@@ -470,7 +537,7 @@ def build_demand_summary(demand: pd.DataFrame) -> pd.DataFrame:
         .rename(columns={"snapshot_at": "Last_Modified_At"})
     )
     peak_dates = (
-        latest_by_checkin.sort_values(["ProductID", "view_volume", "checkin_date"])
+        interval_by_checkin.sort_values(["ProductID", "view_volume", "checkin_date"])
         .drop_duplicates("ProductID", keep="last")
         [["ProductID", "checkin_date"]]
         .rename(columns={"checkin_date": "Peak_CheckIn_Date"})
@@ -483,7 +550,7 @@ def build_demand_summary(demand: pd.DataFrame) -> pd.DataFrame:
         summary["Current_Hotness"].fillna(0) * 40
         + summary["Current_Trend"].fillna(0) * 20
         + _safe_max_score(summary["Current_Views"]) * 0.20
-        + _safe_max_score(summary["Observed_View_Increase"]) * 0.20
+        + _safe_max_score(summary["Active_View_Intervals"]) * 0.20
     ).round(2)
     return summary
 
@@ -653,8 +720,9 @@ def run_pipeline(demand_path: Path | None = None):
     previous_demand = (
         prepare_demand(pd.read_csv(previous_path)) if previous_path is not None else None
     )
-    summary = build_demand_summary(demand)
-    funnel = build_hotel_date_funnel(demand, previous_demand)
+    current_period, baseline_period = select_interval_periods(demand, previous_demand)
+    summary = build_demand_summary(current_period)
+    funnel = build_hotel_date_funnel(current_period, baseline_period)
     engine = build_engine(summary, master, performance, funnel)
     export_outputs(engine, summary, funnel)
     return engine, demand, source
