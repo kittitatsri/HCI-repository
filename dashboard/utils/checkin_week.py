@@ -80,21 +80,25 @@ def build_checkin_week_comparison(
         validate="many_to_one",
     )
 
-    def daily_searches(source: pd.DataFrame, period: str, shift_days: int = 0) -> pd.DataFrame:
-        result = (
+    def daily_activity(source: pd.DataFrame, period: str, shift_days: int = 0) -> pd.DataFrame:
+        searches = (
             source.drop_duplicates(["Destination", "checkin_date"])
             .groupby("checkin_date", as_index=False)["Destination_Searches"]
             .sum()
             .rename(columns={"Destination_Searches": "Searches"})
         )
+        views = source.groupby("checkin_date", as_index=False)["view_volume"].sum().rename(
+            columns={"view_volume": "Views"}
+        )
+        result = searches.merge(views, on="checkin_date", how="outer")
         result["Matched_Date"] = result["checkin_date"] + pd.Timedelta(days=shift_days)
         result["Period"] = period
         return result
 
     daily = pd.concat(
         [
-            daily_searches(current, "Selected week"),
-            daily_searches(previous, "Previous week", shift_days=7),
+            daily_activity(current, "Selected week"),
+            daily_activity(previous, "Previous week", shift_days=7),
         ],
         ignore_index=True,
     )

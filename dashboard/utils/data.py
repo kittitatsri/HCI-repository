@@ -50,44 +50,58 @@ def iso_week_options(demand: pd.DataFrame) -> list[tuple[str, pd.Timestamp]]:
 
 @st.cache_data(show_spinner=False)
 def build_checkin_date_trend(demand: pd.DataFrame) -> pd.DataFrame:
-    """Aggregate all stored interval searches by destination and check-in date."""
+    """Aggregate all stored interval searches and views by destination/check-in date."""
     frame = demand.copy()
     frame["snapshot_at"] = pd.to_datetime(frame["snapshot_at"], errors="coerce")
     frame["checkin_date"] = pd.to_datetime(frame["checkin_date"], errors="coerce").dt.normalize()
     frame["search_volume"] = pd.to_numeric(frame["search_volume"], errors="coerce")
+    frame["view_volume"] = pd.to_numeric(frame["view_volume"], errors="coerce").fillna(0)
+    frame["ProductID"] = pd.to_numeric(frame["ProductID"], errors="coerce").astype("Int64")
     frame = frame.dropna(subset=["snapshot_at", "checkin_date", "Destination"])
     timestamps = frame["snapshot_at"].drop_duplicates().sort_values()
     batches = timestamps.diff().dt.total_seconds().fillna(301).gt(300).cumsum()
     batch_map = pd.DataFrame({"snapshot_at": timestamps, "Observation_Batch": batches})
     frame = frame.merge(batch_map, on="snapshot_at", how="left", validate="many_to_one")
-    interval = (
+    search_interval = (
         frame.groupby(
             ["Observation_Batch", "Destination", "checkin_date"], as_index=False
         )["search_volume"]
         .median()
     )
-    return (
-        interval.groupby(["Destination", "checkin_date"], as_index=False)["search_volume"]
+    searches = (
+        search_interval.groupby(["Destination", "checkin_date"], as_index=False)["search_volume"]
         .sum()
         .rename(columns={"search_volume": "Searches"})
     )
+    view_interval = (
+        frame.dropna(subset=["ProductID"])
+        .sort_values(["Observation_Batch", "ProductID", "checkin_date", "snapshot_at"])
+        .drop_duplicates(["Observation_Batch", "ProductID", "checkin_date"], keep="last")
+    )
+    views = (
+        view_interval.groupby(["Destination", "checkin_date"], as_index=False)["view_volume"]
+        .sum()
+        .rename(columns={"view_volume": "Views"})
+    )
+    return searches.merge(views, on=["Destination", "checkin_date"], how="outer")
 
 
 @st.cache_data(show_spinner=False)
 def build_hotel_checkin_trend(demand: pd.DataFrame, product_id: int) -> pd.DataFrame:
-    """Aggregate all stored interval views for one hotel by check-in date."""
+    """Aggregate hotel views and its destination-search context by check-in date."""
     frame = demand.copy()
     frame["snapshot_at"] = pd.to_datetime(frame["snapshot_at"], errors="coerce")
     frame["checkin_date"] = pd.to_datetime(frame["checkin_date"], errors="coerce").dt.normalize()
     frame["ProductID"] = pd.to_numeric(frame["ProductID"], errors="coerce").astype("Int64")
     frame["view_volume"] = pd.to_numeric(frame["view_volume"], errors="coerce").fillna(0)
+    frame["search_volume"] = pd.to_numeric(frame["search_volume"], errors="coerce").fillna(0)
     frame = frame[
         frame["ProductID"].eq(product_id)
         & frame["snapshot_at"].notna()
         & frame["checkin_date"].notna()
     ].copy()
     if frame.empty:
-        return pd.DataFrame(columns=["checkin_date", "Hotel Views"])
+        return pd.DataFrame(columns=["checkin_date", "Destination Searches", "Hotel Views"])
 
     timestamps = frame["snapshot_at"].drop_duplicates().sort_values()
     batches = timestamps.diff().dt.total_seconds().fillna(301).gt(300).cumsum()
@@ -97,12 +111,20 @@ def build_hotel_checkin_trend(demand: pd.DataFrame, product_id: int) -> pd.DataF
         frame.sort_values(["Observation_Batch", "checkin_date", "snapshot_at"])
         .drop_duplicates(["Observation_Batch", "checkin_date"], keep="last")
     )
-    return (
+    views = (
         interval.groupby("checkin_date", as_index=False)["view_volume"]
         .sum()
         .rename(columns={"view_volume": "Hotel Views"})
         .sort_values("checkin_date")
     )
+    searches = (
+        frame.groupby(["Observation_Batch", "checkin_date"], as_index=False)["search_volume"]
+        .median()
+        .groupby("checkin_date", as_index=False)["search_volume"]
+        .sum()
+        .rename(columns={"search_volume": "Destination Searches"})
+    )
+    return searches.merge(views, on="checkin_date", how="outer").sort_values("checkin_date")
 
 
 @st.cache_data(show_spinner=False)
