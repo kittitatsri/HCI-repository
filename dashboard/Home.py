@@ -54,7 +54,9 @@ if update_message:
 
 @st.cache_data(show_spinner=False)
 def prepare_home_data(engine: pd.DataFrame, funnel: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
-    hotel_columns = ["ProductID", "Region", "HotelType Short"]
+    hotel_columns = [
+        "ProductID", "Region", "HotelType Short", "Agoda Status", "Ctrip Status"
+    ]
     hotel_master = engine[hotel_columns].drop_duplicates("ProductID")
     detail = funnel.merge(hotel_master, on="ProductID", how="left", validate="many_to_one")
     detail["checkin_date"] = pd.to_datetime(detail["checkin_date"], errors="coerce").dt.normalize()
@@ -358,54 +360,11 @@ with st.expander("Update demand data", expanded=False):
                             st.rerun()
 
 
-mode_col, week_col = st.columns([1.2, 2.8])
-view_mode = mode_col.radio(
-    "Comparison view", ["Daily", "Snapshot Week", "Check-in Week"], horizontal=True
-)
-comparison_label = "previous upload"
-if view_mode == "Snapshot Week":
-    demand_history = load_demand()
-    week_options = iso_week_options(demand_history)
-    week_labels = [label for label, _ in week_options]
-    selected_week_label = week_col.selectbox("ISO week", week_labels)
-    selected_week_start = dict(week_options)[selected_week_label]
-    weekly_funnel = build_weekly_comparison(demand_history, selected_week_start)
-    selected_week_end = selected_week_start + pd.Timedelta(days=7)
-    week_latest_snapshot = demand_history.loc[
-        demand_history["snapshot_at"].ge(selected_week_start)
-        & demand_history["snapshot_at"].lt(selected_week_end),
-        "snapshot_at",
-    ].max()
-    week_col.caption(f"Latest snapshot available: {week_latest_snapshot:%d %b %Y, %H:%M}")
-    detail, daily = prepare_home_data(engine, weekly_funnel)
-    comparison_label = "previous ISO week"
-elif view_mode == "Check-in Week":
-    week_starts = (
-        daily["checkin_date"] - pd.to_timedelta(daily["checkin_date"].dt.weekday, unit="D")
-    ).drop_duplicates().sort_values(ascending=False)
-    week_options = {
-        f"{start.isocalendar().year}-W{start.isocalendar().week:02d} "
-        f"({start:%d %b}–{start + pd.Timedelta(days=6):%d %b})": start
-        for start in week_starts
-    }
-    current_week_start = pd.Timestamp(date.today()) - pd.Timedelta(days=date.today().weekday())
-    default_index = list(week_options.values()).index(current_week_start) if current_week_start in week_options.values() else 0
-    selected_label = week_col.selectbox("Check-in ISO week", list(week_options), index=default_index)
-    week_col.caption(
-        "Compares demand for this check-in week with demand for the previous check-in week."
-    )
-    render_checkin_week(detail, pd.Timestamp(week_options[selected_label]))
-    st.stop()
-else:
-    week_col.caption(
-        "Daily compares summed intervals from the newest upload with an equally sized preceding window."
-    )
-
 available_dates = daily["checkin_date"].dt.date.tolist()
 today = date.today()
 default_date = today if today in available_dates else available_dates[0]
 
-filter_1, filter_2, filter_3 = st.columns([1.2, 1.5, 2.3])
+filter_1, filter_2, filter_3 = st.columns([1.2, 1.6, 2.2])
 selected_date = filter_1.date_input(
     "Check-in date",
     value=default_date,
@@ -424,23 +383,8 @@ filter_3.markdown(
 
 selected_ts = pd.Timestamp(selected_date)
 selected_detail = detail[detail["checkin_date"].eq(selected_ts)].copy()
-trend_detail = detail.copy()
 if destinations:
     selected_detail = selected_detail[selected_detail["Destination"].isin(destinations)]
-    trend_detail = trend_detail[trend_detail["Destination"].isin(destinations)]
-
-selected_daily = build_daily_market(trend_detail)
-if view_mode == "Daily":
-    history_trend = build_checkin_date_trend(load_demand())
-    if destinations:
-        history_trend = history_trend[history_trend["Destination"].isin(destinations)]
-    selected_daily_trend = (
-        history_trend.groupby("checkin_date", as_index=False)["Searches"].sum()
-        .sort_values("checkin_date")
-    )
-else:
-    selected_daily_trend = selected_daily
-selected_row = selected_daily[selected_daily["checkin_date"].eq(selected_ts)]
 selected_destinations = selected_detail.drop_duplicates(["Destination", "checkin_date"]).copy()
 selected_searches = float(selected_destinations["Destination_Searches"].sum())
 previous_searches = (
@@ -455,209 +399,94 @@ search_change = (
 )
 change_pct = search_change / previous_searches if previous_searches and pd.notna(search_change) else np.nan
 
-portfolio_level = daily.loc[daily["checkin_date"].eq(selected_ts), "Demand Level"]
-demand_level = portfolio_level.iloc[0] if not portfolio_level.empty else "No data"
-high_dates = int(daily["Demand Level"].isin(["Very High", "High"]).sum())
 active_hotels = int(selected_detail["ProductID"].nunique())
-rising_hotels = int(selected_detail["View_Change"].gt(0).sum())
-hotel_q75 = selected_detail["view_volume"].quantile(0.75) if not selected_detail.empty else 0
 selected_detail["View Change %"] = np.where(
     selected_detail["Previous_Views"].gt(0),
     selected_detail["View_Change"] / selected_detail["Previous_Views"],
     np.nan,
 )
-destination_change_pct = np.where(
-    selected_destinations["Previous_Destination_Searches"].gt(0),
-    selected_destinations["Destination_Search_Change"]
-    / selected_destinations["Previous_Destination_Searches"],
-    np.nan,
-)
-selected_destinations["Destination Signal"] = np.select(
+hotel_q80 = selected_detail["view_volume"].quantile(0.80) if not selected_detail.empty else 0
+high_views = selected_detail["view_volume"].gt(0) & selected_detail["view_volume"].ge(hotel_q80)
+rising_views = selected_detail["View_Change"].gt(0)
+selected_detail["Work Priority"] = np.select(
+    [high_views & rising_views, high_views, rising_views],
     [
-        selected_destinations["Previous_Destination_Searches"].isna(),
-        pd.Series(destination_change_pct, index=selected_destinations.index).ge(0.25),
-        pd.Series(destination_change_pct, index=selected_destinations.index).ge(0.10),
-        pd.Series(destination_change_pct, index=selected_destinations.index).le(-0.10),
+        "Urgent — high views and rising",
+        "High — high views, even if stable",
+        "Medium — lower views but rising",
     ],
-    ["New demand", "Critical surge", "High increase", "Declining"],
-    default="Stable",
+    default="Routine — low or zero views without growth",
 )
-selected_detail = selected_detail.merge(
-    selected_destinations[["Destination", "Destination Signal"]],
-    on="Destination",
-    how="left",
-    validate="many_to_one",
-)
-action_hotels = int(
-    (
-        selected_detail["Destination Signal"].isin(["Critical surge", "High increase", "New demand"])
-        & (
-            selected_detail["View_Change"].gt(0)
-            | selected_detail["view_volume"].ge(hotel_q75)
-        )
-    ).sum()
-)
-date_signal = (
-    "No baseline"
-    if pd.isna(change_pct)
-    else "Critical surge"
-    if change_pct >= 0.25
-    else "High increase"
-    if change_pct >= 0.10
-    else "Declining"
-    if change_pct <= -0.10
-    else "Stable"
+priority_order = {
+    "Urgent — high views and rising": 1,
+    "High — high views, even if stable": 2,
+    "Medium — lower views but rising": 3,
+    "Routine — low or zero views without growth": 4,
+}
+selected_detail["Priority Order"] = selected_detail["Work Priority"].map(priority_order)
+
+urgent = int(selected_detail["Work Priority"].str.startswith("Urgent").sum())
+high = int(selected_detail["Work Priority"].str.startswith("High").sum())
+medium = int(selected_detail["Work Priority"].str.startswith("Medium").sum())
+mapping_issue = int(
+    (~selected_detail["Agoda Status"].eq("Mapped") | ~selected_detail["Ctrip Status"].eq("Mapped")).sum()
 )
 
 k1, k2, k3, k4, k5 = st.columns(5)
-k1.metric(
-    "Destination demand signal",
-    date_signal,
-    help=(
-        "How did our demand snapshot change from one upload week to another? Compares demand "
-        "observed in the selected upload week with the previous upload week for the same "
-        "check-in date."
-        if view_mode == "Snapshot Week"
-        else "Compares the latest demand upload with the previous upload for the selected check-in date."
-    ),
-)
-k2.metric("Destination searches", f"{selected_searches:,.0f}")
-k3.metric(
-    "Change vs previous snapshot week" if view_mode == "Snapshot Week" else "Change vs previous upload",
-    "No baseline" if pd.isna(change_pct) else f"{change_pct:+.1%}",
-    delta=None if pd.isna(search_change) else f"{search_change:+,.0f} searches",
-    help=(
-        "How did our demand snapshot change from one upload week to another? Compares the same "
-        "check-in date between the selected and previous upload weeks."
-        if view_mode == "Snapshot Week"
-        else "Compares the selected check-in date between the latest and previous demand uploads."
-    ),
-)
-k4.metric("Hotels with rising views", f"{rising_hotels:,} of {active_hotels:,}")
-k5.metric("Hotels requiring action", f"{action_hotels:,}")
+k1.metric("Urgent", f"{urgent:,}", help="High hotel views and rising versus the previous upload.")
+k2.metric("High priority", f"{high:,}", help="High hotel views, even when stable.")
+k3.metric("Medium priority", f"{medium:,}", help="Lower hotel views that are rising.")
+k4.metric("Hotels with demand", f"{active_hotels:,}")
+k5.metric("Mapping checks", f"{mapping_issue:,}", help="Hotels not mapped on Agoda or Ctrip.")
 
-
-chart_col, dates_col = st.columns([2.15, 1])
-with chart_col:
-    st.subheader("Destination search trend")
-    base = (
-        alt.Chart(selected_daily_trend)
-        .mark_line(point=True, strokeWidth=2.5, color="#2563eb")
-        .encode(
-            x=alt.X("checkin_date:T", title=None, axis=alt.Axis(format="%d %b", labelAngle=-35)),
-            y=alt.Y("Searches:Q", title="Destination searches", axis=alt.Axis(format="~s")),
-            tooltip=[
-                alt.Tooltip("checkin_date:T", title="Check-in", format="%d %b %Y"),
-                alt.Tooltip("Searches:Q", title="Destination searches", format=",.0f"),
-            ],
-        )
-        .properties(height=310)
+if pd.isna(change_pct):
+    st.info("Demand comparison is unavailable for this date. Prioritize using observed hotel views.")
+elif change_pct >= 0.10:
+    st.warning(
+        f"Destination searches are {change_pct:+.1%} versus the previous upload "
+        f"({search_change:+,.0f}). Review Urgent hotels first."
     )
-    selected_rule = (
-        alt.Chart(pd.DataFrame({"checkin_date": [selected_ts]}))
-        .mark_rule(color="#f59e0b", strokeWidth=2, strokeDash=[5, 4])
-        .encode(x="checkin_date:T")
-    )
-    st.altair_chart(base + selected_rule, width="stretch")
 
-with dates_col:
-    st.subheader("Strong demand dates")
-    strongest = daily.sort_values(["Searches", "checkin_date"], ascending=[False, True]).head(5)
-    for row in strongest.itertuples(index=False):
-        st.markdown(
-            f'<div class="date-row"><div><b>{row.checkin_date:%d %b %Y}</b><br>'
-            f'<span>{row.Searches:,.0f} searches · {row.Hotels:,} hotels</span></div>'
-            f'{level_badge(getattr(row, "_4"))}</div>',
-            unsafe_allow_html=True,
-        )
-    st.caption(f"{high_dates} check-in dates currently show high or very high portfolio demand.")
+queue = selected_detail.sort_values(
+    ["Priority Order", "view_volume", "View_Change", "ProductName"],
+    ascending=[True, False, False, True],
+).head(10).copy()
+queue["Priority"] = np.arange(1, len(queue) + 1)
+queue["Hotel"] = queue["ProductName"]
+queue["Observed Views"] = queue["view_volume"]
+queue["View Change %"] = queue["View Change %"] * 100
+queue["Open Hotel"] = queue.apply(
+    lambda row: (
+        f"Hotel_Explorer?product_id={int(row['ProductID'])}"
+        f"&checkin_date={selected_ts:%Y-%m-%d}"
+    ),
+    axis=1,
+)
 
-
-st.subheader(f"Hotels to check — {selected_ts:%d %b %Y}")
+st.subheader(f"Today’s hotel work queue — check-in {selected_ts:%d %b %Y}")
 st.caption(
-    f"Ranked first by observed hotel views in the comparison period; signals use the {comparison_label}. "
-    "Inventory and parity are checked outside HCI."
+    "Start at the top. Check inventory manually, then verify rate parity and mapping in Hotel Explorer."
 )
-
-selected_detail["Hotel Signal"] = np.select(
-    [
-        selected_detail["Previous_Views"].isna() | selected_detail["check_status"].eq("new entry"),
-        selected_detail["View Change %"].ge(0.25),
-        selected_detail["View Change %"].ge(0.10),
-        selected_detail["View Change %"].le(-0.10),
-    ],
-    ["New interest", "Critical surge", "High increase", "Declining"],
-    default="Stable",
-)
-hotel_signal_order = {"Critical surge": 5, "High increase": 4, "New interest": 3, "Stable": 2, "Declining": 1}
-destination_signal_order = {"Critical surge": 5, "High increase": 4, "New demand": 3, "Stable": 2, "Declining": 1}
-selected_detail["Hotel Signal Order"] = selected_detail["Hotel Signal"].map(hotel_signal_order).fillna(0)
-selected_detail["Destination Signal Order"] = selected_detail["Destination Signal"].map(destination_signal_order).fillna(0)
-selected_detail["Has Views"] = selected_detail["view_volume"].gt(0)
-hotel_table = selected_detail.sort_values(
-    ["Has Views", "view_volume", "Hotel Signal Order", "Destination Signal Order", "View_Change", "ProductName"],
-    ascending=[False, False, False, False, False, True],
-).head(12).copy()
-hotel_table["Priority"] = np.arange(1, len(hotel_table) + 1)
-if not hotel_table.empty:
-    hotel_q50 = selected_detail["view_volume"].quantile(0.50)
-    hotel_q80 = selected_detail["view_volume"].quantile(0.80)
-    hotel_table["Demand Level"] = np.select(
-        [hotel_table["view_volume"].ge(hotel_q80), hotel_table["view_volume"].ge(hotel_q50)],
-        ["Very High", "High"],
-        default="Medium",
-    )
-    hotel_table["Why prioritized"] = np.select(
-        [
-            hotel_table["Destination Signal"].isin(["Critical surge", "High increase"])
-            & hotel_table["View_Change"].gt(0),
-            hotel_table["Demand Level"].eq("Very High"),
-        ],
-        ["Destination rising + hotel views rising", "High hotel views"],
-        default="Hotel interest to monitor",
-    )
-    high_views = hotel_table["view_volume"].gt(0) & hotel_table["view_volume"].ge(hotel_q80)
-    rising_views = hotel_table["View_Change"].gt(0)
-    hotel_table["Work Priority"] = np.select(
-        [high_views & rising_views, high_views, rising_views],
-        [
-            "Urgent — high views and rising",
-            "High — high views, even if stable",
-            "Medium — lower views but rising",
-        ],
-        default="Routine — low or zero views without growth",
-    )
-    hotel_table = hotel_table.rename(
-        columns={"ProductName": "Hotel", "view_volume": "Observed Views"}
-    )
-    hotel_table["View Change %"] = hotel_table["View Change %"] * 100
+if not queue.empty:
     st.dataframe(
-        style_table(hotel_table[
-            [
-                "Priority",
-                "Hotel",
-                "Destination",
-                "Observed Views",
-                "View Change %",
-                "Why prioritized",
-                "Work Priority",
-            ]
-        ]),
+        style_table(queue[[
+            "Priority", "Work Priority", "Hotel", "Destination", "Observed Views",
+            "View Change %", "Open Hotel",
+        ]]),
         hide_index=True,
         width="stretch",
-        height=455,
+        height=420,
         column_config={
-            "Priority": st.column_config.NumberColumn("Priority", format="%d", width="small"),
-            "Observed Views": st.column_config.NumberColumn("Observed Views", format="localized"),
-            "View Change %": st.column_config.NumberColumn("View Change %", format="%+.1f%%"),
-            "Work Priority": st.column_config.TextColumn("Work Priority", width="large"),
+            "Priority": st.column_config.NumberColumn(format="%d", width="small"),
+            "Work Priority": st.column_config.TextColumn(width="large"),
+            "Observed Views": st.column_config.NumberColumn(format="localized"),
+            "View Change %": st.column_config.NumberColumn(format="%+.1f%%"),
+            "Open Hotel": st.column_config.LinkColumn("Action", display_text="Open Hotel Explorer"),
         },
     )
 else:
     st.info("No hotel demand is available for this date and filter selection.")
 
-st.markdown(
-    '<div class="workflow-note"><b>MM workflow:</b> Select a check-in date → identify high-demand hotels → '
-    'check inventory manually → use the existing rate-parity tool.</div>',
-    unsafe_allow_html=True,
-)
+nav_left, nav_right = st.columns(2)
+nav_left.page_link("pages/1_📅_Demand_by_Date.py", label="Open Demand by Date for deeper analysis", icon="📅")
+nav_right.page_link("pages/3_✅_Data_Quality.py", label="Review Data Quality", icon="✅")
