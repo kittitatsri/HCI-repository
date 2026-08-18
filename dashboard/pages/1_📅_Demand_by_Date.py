@@ -184,18 +184,17 @@ def render_checkin_week(
     k4.metric("Hotels with higher weekly views", f"{int(hotels['View_Change'].gt(0).sum()):,} of {len(hotels):,}")
     k5.metric("Hotels requiring action", f"{int(hotels['Action'].sum()):,}")
 
-    st.subheader("Search and view position: this week vs previous week", help=definition)
+    st.subheader("Searches and views: this week vs previous week", help=definition)
     weekly_chart = weekday.melt(
         id_vars=["checkin_date", "Matched_Date", "Period", "Weekday"],
         value_vars=["Searches", "Views"], var_name="Metric", value_name="Volume",
     )
-    weekly_chart["Position"] = weekly_chart.groupby(["Period", "Metric"])["Volume"].rank(pct=True) * 100
     chart = (
         alt.Chart(weekly_chart)
         .mark_line(point=True, strokeWidth=2.5)
         .encode(
             x=alt.X("Weekday:O", sort=["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"], title=None),
-            y=alt.Y("Position:Q", title="Position (0–100)", scale=alt.Scale(domain=[0, 100])),
+            y=alt.Y("Volume:Q", title="Observed value", axis=alt.Axis(format="~s")),
             color=alt.Color(
                 "Metric:N",
                 scale=alt.Scale(domain=["Searches", "Views"], range=["#2563eb", "#16a34a"]),
@@ -527,13 +526,12 @@ with chart_col:
             id_vars="checkin_date", value_vars=["Searches", "Views"],
             var_name="Metric", value_name="Volume",
         )
-        chart_source["Position"] = chart_source.groupby("Metric")["Volume"].rank(pct=True) * 100
         demand_chart = (
             alt.Chart(chart_source)
             .mark_line(point=True, strokeWidth=2.5)
             .encode(
                 x=alt.X("checkin_date:T", title=None, axis=alt.Axis(format="%d %b", labelAngle=-35)),
-                y=alt.Y("Position:Q", title="Position (0–100)", scale=alt.Scale(domain=[0, 100])),
+                y=alt.Y("Volume:Q", title="Observed value", axis=alt.Axis(format="~s")),
                 color=alt.Color("Metric:N", title=None, scale=alt.Scale(
                     domain=["Searches", "Views"], range=["#2563eb", "#16a34a"]
                 )),
@@ -541,14 +539,13 @@ with chart_col:
                     alt.Tooltip("checkin_date:T", title="Check-in", format="%d %b %Y"),
                     "Metric:N",
                     alt.Tooltip("Volume:Q", title="Observed volume", format=",.0f"),
-                    alt.Tooltip("Position:Q", title="Position", format=".0f"),
                 ],
             )
             .properties(height=320)
         )
-        st.caption("Position compares each check-in date with other visible dates. Hover to see actual searches or views; KPI cards still compare uploads.")
+        st.caption("Y-axis shows actual observed searches and views. Hover for exact values; KPI cards still compare uploads.")
     else:
-        st.subheader("Search and view change position by check-in date")
+        st.subheader("Search and view change by check-in date")
         chart_source = filtered_daily.melt(
             id_vars="checkin_date",
             value_vars=["Search_Change", "View_Change"],
@@ -557,16 +554,12 @@ with chart_col:
         chart_source["Metric"] = chart_source["Metric"].map(
             {"Search_Change": "Searches", "View_Change": "Views"}
         )
-        chart_source["Change Position"] = (
-            chart_source.groupby("Metric")["Change"].transform(lambda values: values.abs().rank(pct=True))
-            * 100 * np.sign(chart_source["Change"])
-        )
         demand_chart = (
             alt.Chart(chart_source)
             .mark_line(point=True, strokeWidth=2.5)
         .encode(
             x=alt.X("checkin_date:T", title=None, axis=alt.Axis(format="%d %b", labelAngle=-35)),
-            y=alt.Y("Change Position:Q", title="Change position (-100–100)", scale=alt.Scale(domain=[-100, 100])),
+            y=alt.Y("Change:Q", title="Observed change", axis=alt.Axis(format="~s")),
             color=alt.Color("Metric:N", title=None, scale=alt.Scale(
                 domain=["Searches", "Views"], range=["#2563eb", "#16a34a"]
             )),
@@ -574,12 +567,11 @@ with chart_col:
                 alt.Tooltip("checkin_date:T", title="Check-in", format="%d %b %Y"),
                 "Metric:N",
                 alt.Tooltip("Change:Q", title="Observed change", format="+,.0f"),
-                alt.Tooltip("Change Position:Q", title="Change position", format="+.0f"),
             ],
         )
             .properties(height=320)
         )
-        st.caption("Positive positions increased; negative positions decreased. Hover for actual search or view change.")
+        st.caption("Positive values increased; negative values decreased. Hover for exact search or view change.")
     rule = (
         alt.Chart(pd.DataFrame({"checkin_date": [selected_ts]}))
         .mark_rule(color="#f59e0b", strokeWidth=2, strokeDash=[5, 4])

@@ -287,13 +287,12 @@ with chart_col:
         var_name="Metric",
         value_name="Volume",
     )
-    chart_data["Position"] = chart_data.groupby("Metric")["Volume"].rank(pct=True) * 100
     lines = (
         alt.Chart(chart_data)
         .mark_line(point=True, strokeWidth=2.5)
         .encode(
             x=alt.X("checkin_date:T", title=None, axis=alt.Axis(format="%d %b", labelAngle=-35)),
-            y=alt.Y("Position:Q", title="Position (0–100)", scale=alt.Scale(domain=[0, 100])),
+            y=alt.Y("Volume:Q", title="Observed value", axis=alt.Axis(format="~s")),
             color=alt.Color("Metric:N", title=None, scale=alt.Scale(
                 domain=["Destination Searches", "Hotel Views"], range=["#2563eb", "#16a34a"]
             )),
@@ -301,7 +300,6 @@ with chart_col:
                 alt.Tooltip("checkin_date:T", title="Check-in", format="%d %b %Y"),
                 "Metric:N",
                 alt.Tooltip("Volume:Q", title="Observed volume", format=",.0f"),
-                alt.Tooltip("Position:Q", title="Position", format=".0f"),
             ],
         )
         .properties(height=315)
@@ -312,7 +310,7 @@ with chart_col:
         .encode(x="checkin_date:T")
     )
     st.altair_chart(lines + selected_rule, width="stretch")
-    st.caption("Blue is destination search context; green is this hotel’s views. Position compares each date within its own metric; hover for actual values.")
+    st.caption("Blue is destination search context; green is this hotel’s views. Y-axis and hover show actual observed values.")
 
 with why_col:
     st.subheader("Why prioritized")

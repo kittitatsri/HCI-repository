@@ -169,18 +169,17 @@ def render_checkin_week(detail: pd.DataFrame, week_start: pd.Timestamp) -> None:
 
     chart_col, date_col = st.columns([2.15, 1])
     with chart_col:
-        st.subheader("Search and view position: this week vs previous week", help=definition)
+        st.subheader("Searches and views: this week vs previous week", help=definition)
         weekly_chart = weekday.melt(
             id_vars=["checkin_date", "Matched_Date", "Period", "Weekday"],
             value_vars=["Searches", "Views"], var_name="Metric", value_name="Volume",
         )
-        weekly_chart["Position"] = weekly_chart.groupby(["Period", "Metric"])["Volume"].rank(pct=True) * 100
         chart = (
             alt.Chart(weekly_chart)
             .mark_line(point=True, strokeWidth=2.5)
             .encode(
                 x=alt.X("Weekday:O", sort=["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"], title=None),
-                y=alt.Y("Position:Q", title="Position (0–100)", scale=alt.Scale(domain=[0, 100])),
+                y=alt.Y("Volume:Q", title="Observed value", axis=alt.Axis(format="~s")),
                 color=alt.Color(
                     "Metric:N",
                     scale=alt.Scale(
@@ -546,18 +545,17 @@ k5.metric("Hotels requiring action", f"{action_hotels:,}")
 
 chart_col, dates_col = st.columns([2.15, 1])
 with chart_col:
-    st.subheader("Search and view position by check-in date")
+    st.subheader("Searches and views by check-in date")
     trend_long = selected_daily_trend.melt(
         id_vars="checkin_date", value_vars=["Searches", "Views"],
         var_name="Metric", value_name="Volume",
     )
-    trend_long["Position"] = trend_long.groupby("Metric")["Volume"].rank(pct=True) * 100
     base = (
         alt.Chart(trend_long)
         .mark_line(point=True, strokeWidth=2.5)
         .encode(
             x=alt.X("checkin_date:T", title=None, axis=alt.Axis(format="%d %b", labelAngle=-35)),
-            y=alt.Y("Position:Q", title="Position (0–100)", scale=alt.Scale(domain=[0, 100])),
+            y=alt.Y("Volume:Q", title="Observed value", axis=alt.Axis(format="~s")),
             color=alt.Color("Metric:N", title=None, scale=alt.Scale(
                 domain=["Searches", "Views"], range=["#2563eb", "#16a34a"]
             )),
@@ -565,7 +563,6 @@ with chart_col:
                 alt.Tooltip("checkin_date:T", title="Check-in", format="%d %b %Y"),
                 "Metric:N",
                 alt.Tooltip("Volume:Q", title="Observed volume", format=",.0f"),
-                alt.Tooltip("Position:Q", title="Position", format=".0f"),
             ],
         )
         .properties(height=310)
@@ -576,7 +573,7 @@ with chart_col:
         .encode(x="checkin_date:T")
     )
     st.altair_chart(base + selected_rule, width="stretch")
-    st.caption("Position compares each check-in date with other visible dates. Hover to see actual searches or views.")
+    st.caption("Y-axis shows actual observed searches and views. Hover over a point for the exact value.")
 
 with dates_col:
     st.subheader("Strong demand dates")
