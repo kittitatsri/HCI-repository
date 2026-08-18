@@ -15,6 +15,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from dashboard.utils.data import (
+    build_checkin_date_trend,
     build_weekly_comparison,
     iso_week_options,
     load_demand,
@@ -501,10 +502,36 @@ k5.metric("Hotels requiring action", f"{action_hotels:,}")
 
 chart_col, destination_col = st.columns([2.05, 1])
 with chart_col:
-    st.subheader("Demand change by check-in date")
-    change_bars = (
-        alt.Chart(filtered_daily)
-        .mark_bar(cornerRadiusTopLeft=3, cornerRadiusTopRight=3)
+    if view_mode == "Daily":
+        st.subheader("Demand trend by check-in date")
+        full_trend = build_checkin_date_trend(load_demand())
+        allowed_destinations = set(destination_options)
+        full_trend = full_trend[full_trend["Destination"].isin(allowed_destinations)]
+        if destinations:
+            full_trend = full_trend[full_trend["Destination"].isin(destinations)]
+        chart_source = (
+            full_trend.groupby("checkin_date", as_index=False)["Searches"].sum()
+            .sort_values("checkin_date")
+        )
+        demand_chart = (
+            alt.Chart(chart_source)
+            .mark_line(point=True, strokeWidth=2.5, color="#2563eb")
+            .encode(
+                x=alt.X("checkin_date:T", title=None, axis=alt.Axis(format="%d %b", labelAngle=-35)),
+                y=alt.Y("Searches:Q", title="Observed destination searches", axis=alt.Axis(format="~s")),
+                tooltip=[
+                    alt.Tooltip("checkin_date:T", title="Check-in", format="%d %b %Y"),
+                    alt.Tooltip("Searches:Q", title="Observed searches", format=",.0f"),
+                ],
+            )
+            .properties(height=320)
+        )
+        st.caption("Uses all stored observation intervals; the KPI cards still compare the newest upload with the previous period.")
+    else:
+        st.subheader("Demand change by check-in date")
+        demand_chart = (
+            alt.Chart(filtered_daily)
+            .mark_bar(cornerRadiusTopLeft=3, cornerRadiusTopRight=3)
         .encode(
             x=alt.X("checkin_date:T", title=None, axis=alt.Axis(format="%d %b", labelAngle=-35)),
             y=alt.Y("Search_Change:Q", title="Search change", axis=alt.Axis(format="~s")),
@@ -521,14 +548,14 @@ with chart_col:
                 "Signal:N",
             ],
         )
-        .properties(height=320)
-    )
+            .properties(height=320)
+        )
     rule = (
         alt.Chart(pd.DataFrame({"checkin_date": [selected_ts]}))
         .mark_rule(color="#f59e0b", strokeWidth=2, strokeDash=[5, 4])
         .encode(x="checkin_date:T")
     )
-    st.altair_chart(change_bars + rule, width="stretch")
+    st.altair_chart(demand_chart + rule, width="stretch")
 
 with destination_col:
     st.subheader("Demand by destination")

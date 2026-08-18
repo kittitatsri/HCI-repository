@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from dashboard.utils.data import load_engine, load_funnel
+from dashboard.utils.data import build_hotel_checkin_trend, load_demand, load_engine, load_funnel
 from dashboard.utils.ui import apply_theme, style_table
 
 
@@ -280,33 +280,17 @@ k4.metric(
 chart_col, why_col = st.columns([2.15, 1])
 with chart_col:
     st.subheader("Demand by Check-in Date")
-    chart_data = hotel_detail.melt(
-        id_vars="checkin_date",
-        value_vars=["Destination_Searches", "view_volume"],
-        var_name="Metric",
-        value_name="Volume",
-    )
-    chart_data["Metric"] = chart_data["Metric"].map(
-        {"Destination_Searches": "Destination Searches", "view_volume": "Hotel Views"}
-    )
+    chart_data = build_hotel_checkin_trend(load_demand(), product_id)
     lines = (
         alt.Chart(chart_data)
         .mark_line(point=True, strokeWidth=2.5)
         .encode(
             x=alt.X("checkin_date:T", title=None, axis=alt.Axis(format="%d %b", labelAngle=-35)),
-            y=alt.Y("Volume:Q", title="Volume", axis=alt.Axis(format="~s")),
-            color=alt.Color(
-                "Metric:N",
-                title=None,
-                scale=alt.Scale(
-                    domain=["Destination Searches", "Hotel Views"],
-                    range=["#2563eb", "#16a34a"],
-                ),
-            ),
+            y=alt.Y("Hotel Views:Q", title="Observed hotel views", axis=alt.Axis(format="~s")),
+            color=alt.value("#16a34a"),
             tooltip=[
                 alt.Tooltip("checkin_date:T", title="Check-in", format="%d %b %Y"),
-                "Metric:N",
-                alt.Tooltip("Volume:Q", format=",.0f"),
+                alt.Tooltip("Hotel Views:Q", title="Observed hotel views", format=",.0f"),
             ],
         )
         .properties(height=315)
@@ -317,6 +301,7 @@ with chart_col:
         .encode(x="checkin_date:T")
     )
     st.altair_chart(lines + selected_rule, width="stretch")
+    st.caption("Uses all stored observation intervals. Destination searches are excluded because they are destination-level, not hotel-level.")
 
 with why_col:
     st.subheader("Why prioritized")
