@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date
+import json
 from pathlib import Path
 import shutil
 import sys
@@ -625,42 +626,66 @@ with map_col:
             "Very Low": [134, 239, 172, 150],
         }
         map_data["Color"] = map_data["Demand Level"].map(colors)
-        map_data["Radius"] = np.sqrt(map_data["Searches"].clip(lower=0) + 1) * 6500
+        demand_lookup = map_data.set_index("Destination").to_dict("index")
+        province_aliases = {
+            "Amnat Charoen": "Amnart Charoen",
+            "Bangkok Metropolis": "Bangkok",
+            "Bueng Kan": "Bungkan",
+            "Buri Ram": "Buriram",
+            "Chai Nat": "Chainat",
+            "Chon Buri": "Chonburi",
+            "Nakhon Ratchasima": "Nakhonratchasima",
+            "Nong Bua Lam Phu": "Nong Bua Lamphu",
+            "Phangnga": "Phang Nga",
+            "Phatthalung": "Phattalung",
+            "Prachuap Khiri Khan": "Prachuapkhirikhan",
+        }
+        with open(ROOT / "data" / "reference" / "thailand_provinces.geojson") as source:
+            province_map = json.load(source)
+        for feature in province_map["features"]:
+            map_name = feature["properties"]["name"]
+            destination = province_aliases.get(map_name, map_name)
+            values = demand_lookup.get(
+                destination,
+                {"Searches": 0, "Views": 0, "Demand Level": "Very Low", "Color": colors["Very Low"]},
+            )
+            feature["properties"].update(
+                {
+                    "Destination": destination,
+                    "Searches": int(round(values["Searches"])),
+                    "Views": int(round(values["Views"])),
+                    "DemandLevel": values["Demand Level"],
+                    "Color": values["Color"],
+                }
+            )
         deck = pdk.Deck(
             map_style="light",
+            views=[pdk.View(type="MapView", controller=False)],
             initial_view_state=pdk.ViewState(
-                latitude=13.2, longitude=101.0, zoom=4.65, pitch=0, bearing=0
+                latitude=13.15, longitude=101.0, zoom=4.62, pitch=0, bearing=0
             ),
             layers=[
                 pdk.Layer(
-                    "HeatmapLayer",
-                    data=map_data,
-                    get_position="[Longitude, Latitude]",
-                    get_weight="Searches",
-                    radius_pixels=38,
-                    intensity=0.85,
-                    threshold=0.05,
-                    color_range=[
-                        [134, 239, 172], [34, 197, 94], [250, 204, 21],
-                        [249, 115, 22], [220, 38, 38],
-                    ],
-                ),
-                pdk.Layer(
-                    "ScatterplotLayer",
-                    data=map_data,
-                    get_position="[Longitude, Latitude]",
-                    get_fill_color="Color",
-                    get_radius="Radius",
-                    radius_min_pixels=5,
-                    radius_max_pixels=18,
-                    pickable=True,
-                    stroked=True,
-                    get_line_color=[255, 255, 255, 210],
+                    "GeoJsonLayer",
+                    data=province_map,
+                    get_fill_color="properties.Color",
+                    get_line_color=[255, 255, 255, 230],
+                    get_line_width=1,
                     line_width_min_pixels=1,
+                    filled=True,
+                    stroked=True,
+                    pickable=True,
+                    auto_highlight=True,
+                    highlight_color=[15, 23, 42, 80],
                 ),
             ],
             tooltip={
-                "html": "<b>{Destination}</b><br/>{Demand Level}<br/>Searches: {Searches}<br/>Hotel views: {Views}",
+                "html": (
+                    "<b>{properties.Destination}</b><br/>"
+                    "Demand: {properties.DemandLevel}<br/>"
+                    "Searches: {properties.Searches}<br/>"
+                    "Hotel views: {properties.Views}"
+                ),
                 "style": {"backgroundColor": "#0f172a", "color": "white"},
             },
         )
@@ -673,8 +698,8 @@ with map_col:
         )
         st.pydeck_chart(deck, width="stretch", height=455)
         st.caption(
-            "Colour = relative search demand · Circle size = search volume · "
-            "Hover for searches and hotel views."
+            "Fixed map · Colour = relative destination search demand · "
+            "Move the cursor over a province for its destination, searches, and hotel views."
         )
     else:
         st.info("No mapped destination demand is available for this date and filter selection.")
