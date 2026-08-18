@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date
+import html
 import json
 from pathlib import Path
 import shutil
@@ -10,6 +11,7 @@ import altair as alt
 import numpy as np
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -95,6 +97,92 @@ def build_daily_market(detail: pd.DataFrame) -> pd.DataFrame:
 def level_badge(level: str) -> str:
     class_name = str(level).lower().replace(" ", "-")
     return f'<span class="demand-badge {class_name}">{level}</span>'
+
+
+def render_thailand_map(province_map: dict) -> None:
+    """Render a fixed, Thailand-only SVG choropleth with cursor tooltips."""
+    width, height, padding = 560, 620, 12
+    points: list[tuple[float, float]] = []
+
+    def polygon_rings(geometry: dict) -> list[list[list[float]]]:
+        if geometry["type"] == "Polygon":
+            return geometry["coordinates"]
+        return [ring for polygon in geometry["coordinates"] for ring in polygon]
+
+    for feature in province_map["features"]:
+        for ring in polygon_rings(feature["geometry"]):
+            points.extend((float(point[0]), float(point[1])) for point in ring)
+    min_lon = min(point[0] for point in points)
+    max_lon = max(point[0] for point in points)
+    min_lat = min(point[1] for point in points)
+    max_lat = max(point[1] for point in points)
+    lon_scale = np.cos(np.deg2rad((min_lat + max_lat) / 2))
+    scale = min(
+        (width - 2 * padding) / ((max_lon - min_lon) * lon_scale),
+        (height - 2 * padding) / (max_lat - min_lat),
+    )
+    map_width = (max_lon - min_lon) * lon_scale * scale
+    map_height = (max_lat - min_lat) * scale
+    offset_x = (width - map_width) / 2
+    offset_y = (height - map_height) / 2
+
+    def project(point: list[float]) -> tuple[float, float]:
+        x = offset_x + (float(point[0]) - min_lon) * lon_scale * scale
+        y = offset_y + (max_lat - float(point[1])) * scale
+        return x, y
+
+    paths = []
+    for feature in province_map["features"]:
+        properties = feature["properties"]
+        commands = []
+        for ring in polygon_rings(feature["geometry"]):
+            projected = [project(point) for point in ring]
+            if not projected:
+                continue
+            commands.append(
+                "M " + " L ".join(f"{x:.2f},{y:.2f}" for x, y in projected) + " Z"
+            )
+        color = properties["Color"]
+        fill = f"rgb({color[0]},{color[1]},{color[2]})"
+        destination = html.escape(str(properties["Destination"]), quote=True)
+        demand_level = html.escape(str(properties["DemandLevel"]), quote=True)
+        searches = int(properties["Searches"])
+        views = int(properties["Views"])
+        paths.append(
+            f'<path d="{" ".join(commands)}" fill="{fill}" data-destination="{destination}" '
+            f'data-demand="{demand_level}" data-searches="{searches:,}" data-views="{views:,}"/>'
+        )
+
+    map_html = f"""
+    <div class="map-wrap">
+      <svg viewBox="0 0 {width} {height}" role="img" aria-label="Thailand demand map">
+        {''.join(paths)}
+      </svg>
+      <div id="map-tooltip"></div>
+    </div>
+    <style>
+      html, body {{ margin:0; padding:0; background:transparent; overflow:hidden; }}
+      .map-wrap {{ position:relative; width:100%; height:450px; }}
+      svg {{ width:100%; height:100%; display:block; }}
+      path {{ stroke:#fff; stroke-width:1.15; vector-effect:non-scaling-stroke; cursor:default; transition:opacity .12s, stroke .12s; }}
+      path:hover {{ opacity:.78; stroke:#0f172a; stroke-width:2.2; }}
+      #map-tooltip {{ display:none; position:absolute; pointer-events:none; z-index:10; background:#0f172a; color:#fff; padding:9px 11px; border-radius:7px; font:13px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; box-shadow:0 5px 18px rgba(15,23,42,.25); line-height:1.45; white-space:nowrap; }}
+    </style>
+    <script>
+      const tooltip = document.getElementById('map-tooltip');
+      document.querySelectorAll('path').forEach(path => {{
+        path.addEventListener('mousemove', event => {{
+          tooltip.innerHTML = `<b>${{path.dataset.destination}}</b><br>Demand: ${{path.dataset.demand}}<br>Searches: ${{path.dataset.searches}}<br>Hotel views: ${{path.dataset.views}}`;
+          tooltip.style.display = 'block';
+          const box = document.querySelector('.map-wrap').getBoundingClientRect();
+          tooltip.style.left = Math.min(event.clientX - box.left + 14, box.width - tooltip.offsetWidth - 8) + 'px';
+          tooltip.style.top = Math.max(event.clientY - box.top - 15, 8) + 'px';
+        }});
+        path.addEventListener('mouseleave', () => tooltip.style.display = 'none');
+      }});
+    </script>
+    """
+    components.html(map_html, height=455, scrolling=False)
 
 
 def render_checkin_week(detail: pd.DataFrame, week_start: pd.Timestamp) -> None:
@@ -657,34 +745,6 @@ with map_col:
                     "Color": values["Color"],
                 }
             )
-        map_chart = (
-            alt.Chart(
-                alt.InlineData(
-                    values=province_map,
-                    format=alt.DataFormat(property="features", type="json"),
-                )
-            )
-            .mark_geoshape(stroke="#ffffff", strokeWidth=0.8)
-            .encode(
-                color=alt.Color(
-                    "properties.DemandLevel:N",
-                    title=None,
-                    scale=alt.Scale(
-                        domain=["Very High", "High", "Medium", "Low", "Very Low"],
-                        range=["#dc2626", "#f97316", "#facc15", "#22c55e", "#86efac"],
-                    ),
-                    legend=None,
-                ),
-                tooltip=[
-                    alt.Tooltip("properties.Destination:N", title="Destination"),
-                    alt.Tooltip("properties.DemandLevel:N", title="Demand"),
-                    alt.Tooltip("properties.Searches:Q", title="Searches", format=",.0f"),
-                    alt.Tooltip("properties.Views:Q", title="Hotel views", format=",.0f"),
-                ],
-            )
-            .project(type="mercator", fit=province_map)
-            .properties(height=455)
-        )
         st.markdown(
             '<div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:6px;font-size:0.82rem;'
             'font-weight:600;color:#475569"><span style="color:#dc2626">● Very High</span>'
@@ -692,7 +752,7 @@ with map_col:
             '<span style="color:#22c55e">● Low</span><span style="color:#86efac">● Very Low</span></div>',
             unsafe_allow_html=True,
         )
-        st.altair_chart(map_chart, width="stretch")
+        render_thailand_map(province_map)
         st.caption(
             "Thailand only · Colour = relative destination search demand · "
             "Move the cursor over a province for its destination, searches, and hotel views."
