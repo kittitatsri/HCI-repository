@@ -281,32 +281,54 @@ chart_col, why_col = st.columns([2.15, 1])
 with chart_col:
     st.subheader("Demand by Check-in Date")
     chart_data = build_hotel_checkin_trend(load_demand(), product_id)
-    chart_data = chart_data.melt(
-        id_vars="checkin_date",
-        value_vars=["Destination Searches", "Hotel Views"],
-        var_name="Metric",
-        value_name="Volume",
-    )
-    lines = (
+    search_line = (
         alt.Chart(chart_data)
-        .mark_line(point=True, strokeWidth=2.5)
+        .mark_line(point=True, strokeWidth=2.5, color="#2563eb")
         .encode(
             x=alt.X("checkin_date:T", title=None, axis=alt.Axis(format="%d %b", labelAngle=-35)),
-            y=alt.Y("Volume:Q", title=None, axis=alt.Axis(format="~s")),
-            color=alt.Color("Metric:N", title=None, scale=alt.Scale(
-                domain=["Destination Searches", "Hotel Views"], range=["#2563eb", "#16a34a"]
-            )),
+            y=alt.Y(
+                "Destination Searches:Q",
+                title="Destination Searches",
+                axis=alt.Axis(format="~s", titleColor="#2563eb", labelColor="#2563eb"),
+            ),
             tooltip=[
                 alt.Tooltip("checkin_date:T", title="Check-in", format="%d %b %Y"),
-                "Metric:N",
-                alt.Tooltip("Volume:Q", title="Observed volume", format=",.0f"),
+                alt.Tooltip("Destination Searches:Q", title="Destination Searches", format=",.0f"),
+                alt.Tooltip("Hotel Views:Q", title="Hotel Views", format=",.0f"),
             ],
         )
-        .properties(height=155)
+        .properties(height=315)
     )
-    chart = lines.facet(row=alt.Row("Metric:N", title=None)).resolve_scale(y="independent")
+    view_line = (
+        alt.Chart(chart_data)
+        .mark_line(point=True, strokeWidth=2.5, color="#16a34a")
+        .encode(
+            x=alt.X("checkin_date:T", title=None),
+            y=alt.Y(
+                "Hotel Views:Q",
+                title="Hotel Views",
+                axis=alt.Axis(
+                    format="~s", orient="right", titleColor="#16a34a", labelColor="#16a34a"
+                ),
+            ),
+            tooltip=[
+                alt.Tooltip("checkin_date:T", title="Check-in", format="%d %b %Y"),
+                alt.Tooltip("Destination Searches:Q", title="Destination Searches", format=",.0f"),
+                alt.Tooltip("Hotel Views:Q", title="Hotel Views", format=",.0f"),
+            ],
+        )
+    )
+    selected_rule = (
+        alt.Chart(pd.DataFrame({"checkin_date": [selected_ts]}))
+        .mark_rule(color="#f59e0b", strokeWidth=2, strokeDash=[5, 4])
+        .encode(x="checkin_date:T")
+    )
+    chart = alt.layer(search_line, view_line, selected_rule).resolve_scale(y="independent")
     st.altair_chart(chart, width="stretch")
-    st.caption("Destination searches use all hotels in the destination. Hotel views use only this hotel. Each panel has its own actual-value scale.")
+    st.caption(
+        "🔵 Destination Searches use the left axis · 🟢 Hotel Views use the right axis · "
+        "The orange line marks the selected check-in date. Hover for exact values."
+    )
 
 with why_col:
     st.subheader("Why prioritized")
