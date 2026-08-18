@@ -9,7 +9,6 @@ import sys
 import altair as alt
 import numpy as np
 import pandas as pd
-import pydeck as pdk
 import streamlit as st
 
 
@@ -658,36 +657,33 @@ with map_col:
                     "Color": values["Color"],
                 }
             )
-        deck = pdk.Deck(
-            map_style="light",
-            views=[pdk.View(type="MapView", controller=False)],
-            initial_view_state=pdk.ViewState(
-                latitude=13.15, longitude=101.0, zoom=4.62, pitch=0, bearing=0
-            ),
-            layers=[
-                pdk.Layer(
-                    "GeoJsonLayer",
-                    data=province_map,
-                    get_fill_color="properties.Color",
-                    get_line_color=[255, 255, 255, 230],
-                    get_line_width=1,
-                    line_width_min_pixels=1,
-                    filled=True,
-                    stroked=True,
-                    pickable=True,
-                    auto_highlight=True,
-                    highlight_color=[15, 23, 42, 80],
+        map_chart = (
+            alt.Chart(
+                alt.InlineData(
+                    values=province_map,
+                    format=alt.DataFormat(property="features", type="json"),
+                )
+            )
+            .mark_geoshape(stroke="#ffffff", strokeWidth=0.8)
+            .encode(
+                color=alt.Color(
+                    "properties.DemandLevel:N",
+                    title=None,
+                    scale=alt.Scale(
+                        domain=["Very High", "High", "Medium", "Low", "Very Low"],
+                        range=["#dc2626", "#f97316", "#facc15", "#22c55e", "#86efac"],
+                    ),
+                    legend=None,
                 ),
-            ],
-            tooltip={
-                "html": (
-                    "<b>{properties.Destination}</b><br/>"
-                    "Demand: {properties.DemandLevel}<br/>"
-                    "Searches: {properties.Searches}<br/>"
-                    "Hotel views: {properties.Views}"
-                ),
-                "style": {"backgroundColor": "#0f172a", "color": "white"},
-            },
+                tooltip=[
+                    alt.Tooltip("properties.Destination:N", title="Destination"),
+                    alt.Tooltip("properties.DemandLevel:N", title="Demand"),
+                    alt.Tooltip("properties.Searches:Q", title="Searches", format=",.0f"),
+                    alt.Tooltip("properties.Views:Q", title="Hotel views", format=",.0f"),
+                ],
+            )
+            .project(type="mercator", fit=province_map)
+            .properties(height=455)
         )
         st.markdown(
             '<div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:6px;font-size:0.82rem;'
@@ -696,9 +692,9 @@ with map_col:
             '<span style="color:#22c55e">● Low</span><span style="color:#86efac">● Very Low</span></div>',
             unsafe_allow_html=True,
         )
-        st.pydeck_chart(deck, width="stretch", height=455)
+        st.altair_chart(map_chart, width="stretch")
         st.caption(
-            "Fixed map · Colour = relative destination search demand · "
+            "Thailand only · Colour = relative destination search demand · "
             "Move the cursor over a province for its destination, searches, and hotel views."
         )
     else:
