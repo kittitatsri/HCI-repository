@@ -384,7 +384,6 @@ def load_agoda_parity() -> pd.DataFrame:
 def build_hotel_date_funnel(
     demand: pd.DataFrame, previous_demand: pd.DataFrame | None = None
 ) -> pd.DataFrame:
-    current_interval_count = _with_observation_batches(demand)["Observation_Batch"].nunique()
     latest = build_latest_demand_by_checkin(demand)
     latest["checkin_date"] = latest["checkin_date"].dt.normalize()
     latest = latest.rename(columns={"search_volume": "Raw_Destination_Search"})
@@ -434,17 +433,14 @@ def build_hotel_date_funnel(
         np.nan,
     )
     if previous_demand is not None and not previous_demand.empty:
-        previous_interval_count = _with_observation_batches(previous_demand)[
-            "Observation_Batch"
-        ].nunique()
-        coverage_scale = (
-            current_interval_count / previous_interval_count if previous_interval_count else np.nan
-        )
         previous = build_latest_demand_by_checkin(previous_demand)[
-            ["ProductID", "checkin_date", "view_volume"]
-        ].rename(columns={"view_volume": "Previous_Views"})
-        if pd.notna(coverage_scale):
-            previous["Previous_Views"] *= coverage_scale
+            ["ProductID", "checkin_date", "view_volume", "Interval_Count"]
+        ].rename(
+            columns={
+                "view_volume": "Previous_Views",
+                "Interval_Count": "Previous_View_Intervals",
+            }
+        )
         previous["checkin_date"] = previous["checkin_date"].dt.normalize()
         funnel = funnel.merge(
             previous,
@@ -456,10 +452,9 @@ def build_hotel_date_funnel(
             columns={
                 "Destination_Searches": "Previous_Destination_Searches",
                 "Destination_Search_Snapshot": "Previous_Destination_Search_Snapshot",
+                "Destination_Intervals": "Previous_Destination_Intervals",
             }
         )
-        if pd.notna(coverage_scale):
-            previous_destination["Previous_Destination_Searches"] *= coverage_scale
         previous_destination["checkin_date"] = previous_destination["checkin_date"].dt.normalize()
         funnel = funnel.merge(
             previous_destination,
@@ -468,10 +463,36 @@ def build_hotel_date_funnel(
             validate="many_to_one",
         )
         new_vs_previous = funnel["Previous_Views"].isna() | funnel["check_status"].eq("new entry")
-        funnel["Destination_Search_Change"] = (
-            funnel["Destination_Searches"] - funnel["Previous_Destination_Searches"]
+        funnel["Comparable_View_Intervals"] = np.minimum(
+            funnel["Interval_Count"], funnel["Previous_View_Intervals"]
         )
-        funnel["View_Change"] = funnel["view_volume"] - funnel["Previous_Views"].fillna(0)
+        funnel["Comparable_Views"] = (
+            funnel["view_volume"] / funnel["Interval_Count"]
+            * funnel["Comparable_View_Intervals"]
+        )
+        funnel["Previous_Comparable_Views"] = (
+            funnel["Previous_Views"] / funnel["Previous_View_Intervals"]
+            * funnel["Comparable_View_Intervals"]
+        )
+        funnel["Comparable_Destination_Intervals"] = np.minimum(
+            funnel["Destination_Intervals"], funnel["Previous_Destination_Intervals"]
+        )
+        funnel["Comparable_Destination_Searches"] = (
+            funnel["Destination_Searches"] / funnel["Destination_Intervals"]
+            * funnel["Comparable_Destination_Intervals"]
+        )
+        funnel["Previous_Comparable_Destination_Searches"] = (
+            funnel["Previous_Destination_Searches"]
+            / funnel["Previous_Destination_Intervals"]
+            * funnel["Comparable_Destination_Intervals"]
+        )
+        funnel["Destination_Search_Change"] = (
+            funnel["Comparable_Destination_Searches"]
+            - funnel["Previous_Comparable_Destination_Searches"]
+        )
+        funnel["View_Change"] = (
+            funnel["Comparable_Views"] - funnel["Previous_Comparable_Views"]
+        )
         funnel["Upload_Change_Status"] = np.select(
             [
                 new_vs_previous,
@@ -483,8 +504,16 @@ def build_hotel_date_funnel(
         )
     else:
         funnel["Previous_Views"] = np.nan
+        funnel["Previous_View_Intervals"] = np.nan
+        funnel["Comparable_View_Intervals"] = np.nan
+        funnel["Comparable_Views"] = np.nan
+        funnel["Previous_Comparable_Views"] = np.nan
         funnel["Previous_Destination_Searches"] = np.nan
         funnel["Previous_Destination_Search_Snapshot"] = pd.NaT
+        funnel["Previous_Destination_Intervals"] = np.nan
+        funnel["Comparable_Destination_Intervals"] = np.nan
+        funnel["Comparable_Destination_Searches"] = np.nan
+        funnel["Previous_Comparable_Destination_Searches"] = np.nan
         funnel["Destination_Search_Change"] = np.nan
         funnel["View_Change"] = np.nan
         funnel["Upload_Change_Status"] = "No baseline"

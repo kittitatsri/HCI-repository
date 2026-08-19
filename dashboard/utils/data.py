@@ -226,11 +226,6 @@ def build_weekly_comparison(demand: pd.DataFrame, week_start: pd.Timestamp) -> p
     batches = timestamps.diff().dt.total_seconds().fillna(301).gt(300).cumsum()
     batch_map = pd.DataFrame({"snapshot_at": timestamps, "Observation_Batch": batches})
     relevant = relevant.merge(batch_map, on="snapshot_at", how="left", validate="many_to_one")
-    interval_counts = relevant.groupby("period")["Observation_Batch"].nunique()
-    latest_count = int(interval_counts.get("latest", 0))
-    previous_count = int(interval_counts.get("previous", 0))
-    previous_scale = latest_count / previous_count if previous_count else np.nan
-
     hotel_keys = ["ProductID", "checkin_date"]
     hotel_rows = (
         relevant.dropna(subset=["ProductID"])
@@ -248,6 +243,7 @@ def build_weekly_comparison(demand: pd.DataFrame, week_start: pd.Timestamp) -> p
         .groupby(hotel_keys, as_index=False)
         .agg(
             view_volume=("view_volume", "sum"),
+            Interval_Count=("Observation_Batch", "nunique"),
             hotness_score=("hotness_score", "mean"),
             trend_momentum=("trend_momentum", "mean"),
         )
@@ -255,16 +251,29 @@ def build_weekly_comparison(demand: pd.DataFrame, week_start: pd.Timestamp) -> p
     )
     previous_hotels = (
         hotel_rows[hotel_rows["period"].eq("previous")]
-        .groupby(hotel_keys, as_index=False)["view_volume"]
-        .sum()
-        .rename(columns={"view_volume": "Previous_Views"})
+        .groupby(hotel_keys, as_index=False)
+        .agg(
+            Previous_Views=("view_volume", "sum"),
+            Previous_View_Intervals=("Observation_Batch", "nunique"),
+        )
     )
-    if pd.notna(previous_scale):
-        previous_hotels["Previous_Views"] *= previous_scale
     latest_hotels = latest_hotels.merge(
         previous_hotels, on=hotel_keys, how="left", validate="one_to_one"
     )
-    latest_hotels["View_Change"] = latest_hotels["view_volume"] - latest_hotels["Previous_Views"]
+    latest_hotels["Comparable_View_Intervals"] = np.minimum(
+        latest_hotels["Interval_Count"], latest_hotels["Previous_View_Intervals"]
+    )
+    latest_hotels["Comparable_Views"] = (
+        latest_hotels["view_volume"] / latest_hotels["Interval_Count"]
+        * latest_hotels["Comparable_View_Intervals"]
+    )
+    latest_hotels["Previous_Comparable_Views"] = (
+        latest_hotels["Previous_Views"] / latest_hotels["Previous_View_Intervals"]
+        * latest_hotels["Comparable_View_Intervals"]
+    )
+    latest_hotels["View_Change"] = (
+        latest_hotels["Comparable_Views"] - latest_hotels["Previous_Comparable_Views"]
+    )
 
     destination_keys = ["Destination", "checkin_date"]
     destination_intervals = (
@@ -278,22 +287,36 @@ def build_weekly_comparison(demand: pd.DataFrame, week_start: pd.Timestamp) -> p
         .agg(
             Destination_Searches=("search_volume", "sum"),
             Destination_Search_Snapshot=("snapshot_at", "max"),
+            Destination_Intervals=("Observation_Batch", "nunique"),
         )
     )
     previous_destinations = (
         destination_intervals[destination_intervals["period"].eq("previous")]
-        .groupby(destination_keys, as_index=False)["search_volume"]
-        .sum()
-        .rename(columns={"search_volume": "Previous_Destination_Searches"})
+        .groupby(destination_keys, as_index=False)
+        .agg(
+            Previous_Destination_Searches=("search_volume", "sum"),
+            Previous_Destination_Intervals=("Observation_Batch", "nunique"),
+        )
     )
-    if pd.notna(previous_scale):
-        previous_destinations["Previous_Destination_Searches"] *= previous_scale
     destinations = latest_destinations.merge(
         previous_destinations, on=destination_keys, how="left", validate="one_to_one"
     )
+    destinations["Comparable_Destination_Intervals"] = np.minimum(
+        destinations["Destination_Intervals"], destinations["Previous_Destination_Intervals"]
+    )
+    destinations["Comparable_Destination_Searches"] = (
+        destinations["Destination_Searches"] / destinations["Destination_Intervals"]
+        * destinations["Comparable_Destination_Intervals"]
+    )
+    destinations["Previous_Comparable_Destination_Searches"] = (
+        destinations["Previous_Destination_Searches"]
+        / destinations["Previous_Destination_Intervals"]
+        * destinations["Comparable_Destination_Intervals"]
+    )
     destinations["Previous_Destination_Search_Snapshot"] = selected_start - pd.Timedelta(seconds=1)
     destinations["Destination_Search_Change"] = (
-        destinations["Destination_Searches"] - destinations["Previous_Destination_Searches"]
+        destinations["Comparable_Destination_Searches"]
+        - destinations["Previous_Comparable_Destination_Searches"]
     )
 
     result = latest_hotels.merge(

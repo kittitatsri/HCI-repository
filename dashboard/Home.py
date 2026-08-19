@@ -65,8 +65,12 @@ def prepare_home_data(engine: pd.DataFrame, funnel: pd.DataFrame) -> tuple[pd.Da
     for column in [
         "Destination_Searches",
         "Previous_Destination_Searches",
+        "Comparable_Destination_Searches",
+        "Previous_Comparable_Destination_Searches",
         "Destination_Search_Change",
         "Previous_Views",
+        "Comparable_Views",
+        "Previous_Comparable_Views",
         "View_Change",
     ]:
         if column not in detail:
@@ -569,8 +573,8 @@ selected_row = selected_daily[selected_daily["checkin_date"].eq(selected_ts)]
 selected_destinations = selected_detail.drop_duplicates(["Destination", "checkin_date"]).copy()
 selected_searches = float(selected_destinations["Destination_Searches"].sum())
 previous_searches = (
-    float(selected_destinations["Previous_Destination_Searches"].sum(min_count=1))
-    if selected_destinations["Previous_Destination_Searches"].notna().any()
+    float(selected_destinations["Previous_Comparable_Destination_Searches"].sum(min_count=1))
+    if selected_destinations["Previous_Comparable_Destination_Searches"].notna().any()
     else np.nan
 )
 search_change = (
@@ -587,14 +591,14 @@ active_hotels = int(selected_detail["ProductID"].nunique())
 rising_hotels = int(selected_detail["View_Change"].gt(0).sum())
 hotel_q75 = selected_detail["view_volume"].quantile(0.75) if not selected_detail.empty else 0
 selected_detail["View Change %"] = np.where(
-    selected_detail["Previous_Views"].gt(0),
-    selected_detail["View_Change"] / selected_detail["Previous_Views"],
+    selected_detail["Previous_Comparable_Views"].gt(0),
+    selected_detail["View_Change"] / selected_detail["Previous_Comparable_Views"],
     np.nan,
 )
 destination_change_pct = np.where(
-    selected_destinations["Previous_Destination_Searches"].gt(0),
+    selected_destinations["Previous_Comparable_Destination_Searches"].gt(0),
     selected_destinations["Destination_Search_Change"]
-    / selected_destinations["Previous_Destination_Searches"],
+    / selected_destinations["Previous_Comparable_Destination_Searches"],
     np.nan,
 )
 selected_destinations["Destination Signal"] = np.select(
@@ -646,11 +650,17 @@ k1.metric(
         else "Compares the latest demand upload with the previous upload for the selected check-in date."
     ),
 )
-k2.metric("Destination searches", f"{selected_searches:,.0f}")
+k2.metric(
+    "Observed searches",
+    f"{selected_searches:,.0f}",
+    help="Sum of interval search observations in the selected current window.",
+)
 k3.metric(
-    "Change vs previous snapshot week" if view_mode == "Snapshot Week" else "Change vs previous upload",
+    "Comparable change vs previous snapshot week"
+    if view_mode == "Snapshot Week"
+    else "Comparable change vs previous upload",
     "No baseline" if pd.isna(change_pct) else f"{change_pct:+.1%}",
-    delta=None if pd.isna(search_change) else f"{search_change:+,.0f} searches",
+    delta=None if pd.isna(search_change) else f"{search_change:+,.0f} comparable searches",
     help=(
         "How did our demand snapshot change from one upload week to another? Compares the same "
         "check-in date between the selected and previous upload weeks."
@@ -690,7 +700,10 @@ selected_rule = (
     .encode(x="checkin_date:T")
 )
 st.altair_chart(base + selected_rule, width="stretch")
-st.caption("Y-axis shows actual observed searches and views. Hover over a point for the exact value.")
+st.caption(
+    "Observed values sum interval activity in the selected current window. "
+    "Comparison KPIs match observation coverage with the previous window."
+)
 
 
 map_searches = selected_destinations[["Destination", "Destination_Searches"]].rename(

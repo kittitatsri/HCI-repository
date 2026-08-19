@@ -64,8 +64,12 @@ def prepare_data(
     for column in [
         "Destination_Searches",
         "Previous_Destination_Searches",
+        "Comparable_Destination_Searches",
+        "Previous_Comparable_Destination_Searches",
         "Destination_Search_Change",
         "Previous_Views",
+        "Comparable_Views",
+        "Previous_Comparable_Views",
         "View_Change",
     ]:
         if column not in detail:
@@ -423,9 +427,9 @@ if destinations:
 selected_ts = pd.Timestamp(selected_date)
 destination_detail = filtered_detail.drop_duplicates(["Destination", "checkin_date"]).copy()
 destination_detail["Change_Pct"] = np.where(
-    destination_detail["Previous_Destination_Searches"].gt(0),
+    destination_detail["Previous_Comparable_Destination_Searches"].gt(0),
     destination_detail["Destination_Search_Change"]
-    / destination_detail["Previous_Destination_Searches"],
+    / destination_detail["Previous_Comparable_Destination_Searches"],
     np.nan,
 )
 destination_detail["Destination Signal"] = np.select(
@@ -454,7 +458,9 @@ filtered_detail["Hotel Action"] = (
 )
 daily_search = destination_detail.groupby("checkin_date", as_index=False).agg(
     Latest_Searches=("Destination_Searches", "sum"),
-    Previous_Searches=("Previous_Destination_Searches", lambda values: values.sum(min_count=1)),
+    Previous_Searches=(
+        "Previous_Comparable_Destination_Searches", lambda values: values.sum(min_count=1)
+    ),
     Search_Change=("Destination_Search_Change", lambda values: values.sum(min_count=1)),
 )
 daily_hotels = filtered_detail.groupby("checkin_date", as_index=False).agg(
@@ -506,15 +512,15 @@ total_change = (
 )
 active_hotels = int(selected["ProductID"].nunique())
 previous_total = (
-    float(selected_destinations["Previous_Destination_Searches"].sum(min_count=1))
-    if selected_destinations["Previous_Destination_Searches"].notna().any()
+    float(selected_destinations["Previous_Comparable_Destination_Searches"].sum(min_count=1))
+    if selected_destinations["Previous_Comparable_Destination_Searches"].notna().any()
     else np.nan
 )
 change_pct = total_change / previous_total if previous_total and not pd.isna(total_change) else np.nan
 rising_hotels = int(selected["View_Change"].gt(0).sum())
 selected["View Change %"] = np.where(
-    selected["Previous_Views"].gt(0),
-    selected["View_Change"] / selected["Previous_Views"],
+    selected["Previous_Comparable_Views"].gt(0),
+    selected["View_Change"] / selected["Previous_Comparable_Views"],
     np.nan,
 )
 selected["Hotel Signal"] = np.select(
@@ -552,11 +558,17 @@ k1.metric(
         else "Compares the latest demand upload with the previous upload for the selected check-in date."
     ),
 )
-k2.metric("Destination searches", f"{total_searches:,.0f}")
+k2.metric(
+    "Observed searches",
+    f"{total_searches:,.0f}",
+    help="Sum of interval search observations in the selected current window.",
+)
 k3.metric(
-    "Change vs previous snapshot week" if view_mode == "Snapshot Week" else "Change vs previous upload",
+    "Comparable change vs previous snapshot week"
+    if view_mode == "Snapshot Week"
+    else "Comparable change vs previous upload",
     "No baseline" if pd.isna(change_pct) else f"{change_pct:+.1%}",
-    delta=None if pd.isna(total_change) else f"{total_change:+,.0f} searches",
+    delta=None if pd.isna(total_change) else f"{total_change:+,.0f} comparable searches",
     help=f"Latest observed searches compared with the {comparison_label}",
 )
 k4.metric("Hotels with rising views", f"{rising_hotels:,} of {active_hotels:,}")
@@ -591,8 +603,8 @@ with chart_col:
         .properties(height=320)
     )
     st.caption(
-        "The graph and KPI cards use the same filtered demand state. Hover for exact values; "
-        "comparison KPIs still use the previous period."
+        "Observed values sum interval activity in the selected current window. "
+        "Comparison KPIs match observation coverage with the previous window."
     )
     rule = (
         alt.Chart(pd.DataFrame({"checkin_date": [selected_ts]}))

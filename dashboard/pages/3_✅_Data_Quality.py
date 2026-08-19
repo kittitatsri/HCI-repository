@@ -37,6 +37,21 @@ def quality_profile() -> dict[str, object]:
     )
     master = pd.read_excel(master_path)
     master["_product_id"] = pd.to_numeric(master["ProductID"], errors="coerce")
+    master_conflict_columns = [
+        column
+        for column in ["ProductName", "Destination", "Region", "HotelType Short"]
+        if column in master
+    ]
+    conflicting_master_ids = 0
+    duplicated_master = master[
+        master["_product_id"].duplicated(False) & master["_product_id"].notna()
+    ]
+    for _, group in duplicated_master.groupby("_product_id"):
+        if any(
+            group[column].fillna("<NA>").astype(str).nunique() > 1
+            for column in master_conflict_columns
+        ):
+            conflicting_master_ids += 1
 
     demand_ids = set(raw_demand["_product_id"].dropna().astype(int))
     master_ids = set(master["_product_id"].dropna().astype(int))
@@ -53,6 +68,7 @@ def quality_profile() -> dict[str, object]:
         "duplicate_snapshot_excess": duplicate_snapshot_excess,
         "unmatched_master_hotels": len(demand_ids - master_ids),
         "master_duplicate_excess": int(master.duplicated("ProductID").sum()),
+        "conflicting_master_ids": conflicting_master_ids,
         "required_columns_present": REQUIRED_DEMAND_COLUMNS.issubset(raw_demand.columns),
         "latest_snapshot": raw_demand["_snapshot_at"].max(),
         "raw_checkin_min": raw_demand["_checkin_date"].min(),
@@ -99,6 +115,7 @@ warning_count = sum(
         profile["duplicate_snapshot_excess"] > 0,
         profile["unmatched_master_hotels"] > 0,
         profile["master_duplicate_excess"] > 0,
+        profile["conflicting_master_ids"] > 0,
     ]
 )
 failed_count = sum(
@@ -179,6 +196,14 @@ checks = pd.DataFrame(
             "Status": "Warning" if profile["master_duplicate_excess"] else "Passed",
             "Finding": f"{profile['master_duplicate_excess']:,} excess rows",
             "Action": "Define the current master record" if profile["master_duplicate_excess"] else "None",
+        },
+        {
+            "Check": "Conflicting master attributes",
+            "Status": "Warning" if profile["conflicting_master_ids"] else "Passed",
+            "Finding": f"{profile['conflicting_master_ids']:,} Product IDs have conflicting attributes",
+            "Action": "Choose one authoritative master record per Product ID"
+            if profile["conflicting_master_ids"]
+            else "None",
         },
         {
             "Check": "Valid demand dates",
