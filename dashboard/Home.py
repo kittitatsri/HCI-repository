@@ -20,6 +20,7 @@ if str(ROOT) not in sys.path:
 
 from dashboard.utils.data import (
     build_checkin_date_trend,
+    build_full_history_funnel,
     build_weekly_comparison,
     clear_data_cache,
     demand_source_path,
@@ -475,8 +476,14 @@ if view_mode == "Snapshot Week":
     detail, daily = prepare_home_data(engine, weekly_funnel)
     comparison_label = "previous ISO week"
 elif view_mode == "Check-in Week":
+    full_history_detail = build_full_history_funnel(load_demand())
+    full_history_detail = full_history_detail[
+        full_history_detail["ProductID"].isin(engine["ProductID"])
+    ]
+    full_history_detail, full_history_daily = prepare_home_data(engine, full_history_detail)
     week_starts = (
-        daily["checkin_date"] - pd.to_timedelta(daily["checkin_date"].dt.weekday, unit="D")
+        full_history_daily["checkin_date"]
+        - pd.to_timedelta(full_history_daily["checkin_date"].dt.weekday, unit="D")
     ).drop_duplicates().sort_values(ascending=False)
     week_options = {
         f"{start.isocalendar().year}-W{start.isocalendar().week:02d} "
@@ -489,7 +496,7 @@ elif view_mode == "Check-in Week":
     week_col.caption(
         "Compares demand for this check-in week with demand for the previous check-in week."
     )
-    render_checkin_week(detail, pd.Timestamp(week_options[selected_label]))
+    render_checkin_week(full_history_detail, pd.Timestamp(week_options[selected_label]))
     st.stop()
 else:
     week_col.caption(

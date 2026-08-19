@@ -87,6 +87,65 @@ def build_checkin_date_trend(demand: pd.DataFrame) -> pd.DataFrame:
 
 
 @st.cache_data(show_spinner=False)
+def build_full_history_funnel(demand: pd.DataFrame) -> pd.DataFrame:
+    """Build hotel/check-in demand from every stored observation interval."""
+    frame = demand.copy()
+    frame["snapshot_at"] = pd.to_datetime(frame["snapshot_at"], errors="coerce")
+    frame["checkin_date"] = pd.to_datetime(frame["checkin_date"], errors="coerce").dt.normalize()
+    frame["ProductID"] = pd.to_numeric(frame["ProductID"], errors="coerce").astype("Int64")
+    frame["search_volume"] = pd.to_numeric(frame["search_volume"], errors="coerce")
+    frame["view_volume"] = pd.to_numeric(frame["view_volume"], errors="coerce").fillna(0)
+    frame["hotness_score"] = pd.to_numeric(frame["hotness_score"], errors="coerce")
+    frame["trend_momentum"] = pd.to_numeric(frame["trend_momentum"], errors="coerce")
+    frame["check_status"] = (
+        frame["check_status"].fillna("unknown").astype(str).str.strip().str.lower()
+    )
+    frame = frame.dropna(
+        subset=["snapshot_at", "checkin_date", "ProductID", "Destination"]
+    )
+    timestamps = frame["snapshot_at"].drop_duplicates().sort_values()
+    batches = timestamps.diff().dt.total_seconds().fillna(301).gt(300).cumsum()
+    batch_map = pd.DataFrame({"snapshot_at": timestamps, "Observation_Batch": batches})
+    frame = frame.merge(batch_map, on="snapshot_at", how="left", validate="many_to_one")
+
+    hotel_keys = ["ProductID", "checkin_date"]
+    hotel_intervals = (
+        frame.sort_values(["Observation_Batch"] + hotel_keys + ["snapshot_at"])
+        .drop_duplicates(["Observation_Batch"] + hotel_keys, keep="last")
+    )
+    metadata = (
+        hotel_intervals.sort_values(hotel_keys + ["snapshot_at"])
+        .drop_duplicates(hotel_keys, keep="last")
+        [hotel_keys + ["ProductName", "Destination", "snapshot_at", "check_status"]]
+    )
+    hotels = (
+        hotel_intervals.groupby(hotel_keys, as_index=False)
+        .agg(
+            view_volume=("view_volume", "sum"),
+            hotness_score=("hotness_score", "mean"),
+            trend_momentum=("trend_momentum", "mean"),
+            Interval_Count=("Observation_Batch", "nunique"),
+        )
+        .merge(metadata, on=hotel_keys, validate="one_to_one")
+    )
+
+    destination_keys = ["Destination", "checkin_date"]
+    destination_intervals = (
+        frame.groupby(["Observation_Batch"] + destination_keys, as_index=False)
+        .agg(search_volume=("search_volume", "median"), snapshot_at=("snapshot_at", "max"))
+    )
+    destinations = (
+        destination_intervals.groupby(destination_keys, as_index=False)
+        .agg(
+            Destination_Searches=("search_volume", "sum"),
+            Destination_Search_Snapshot=("snapshot_at", "max"),
+            Destination_Intervals=("Observation_Batch", "nunique"),
+        )
+    )
+    return hotels.merge(destinations, on=destination_keys, how="left", validate="many_to_one")
+
+
+@st.cache_data(show_spinner=False)
 def build_hotel_checkin_trend(demand: pd.DataFrame, product_id: int) -> pd.DataFrame:
     """Aggregate hotel views and its destination-search context by check-in date."""
     frame = demand.copy()
