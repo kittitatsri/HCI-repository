@@ -279,11 +279,12 @@ def render_checkin_week(
     )
     display["Product ID"] = display["ProductID"]
     display["View Change %"] = display["View Change %"] * 100
+    display_columns = [
+        "Priority", "Product ID", "Hotel", "Region", "Destination", "This Week Views",
+        "View Change %", "Work Priority",
+    ]
     st.dataframe(
-        style_table(display[[
-            "Priority", "Product ID", "Hotel", "Region", "Destination", "This Week Views",
-            "View Change %", "Work Priority",
-        ]].head(200)),
+        style_table(display[display_columns].head(200)),
         hide_index=True,
         width="stretch",
         height=530,
@@ -293,6 +294,18 @@ def render_checkin_week(
             "This Week Views": st.column_config.NumberColumn(format="localized"),
             "View Change %": st.column_config.NumberColumn(format="%+.1f%%"),
         },
+    )
+    st.download_button(
+        "Download filtered hotel priorities",
+        display[display_columns].to_csv(index=False).encode("utf-8-sig"),
+        file_name=f"hotel_demand_priorities_{week_start:%Y-%m-%d}_to_{week_end:%Y-%m-%d}.csv",
+        mime="text/csv",
+        key="download_checkin_week_priorities",
+    )
+    st.markdown(
+        '<div class="workflow-note"><b>Next:</b> Check inventory manually for the highest-demand hotels, '
+        'then open the existing rate-parity tool.</div>',
+        unsafe_allow_html=True,
     )
 
 
