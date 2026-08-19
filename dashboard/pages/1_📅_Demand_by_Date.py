@@ -190,11 +190,24 @@ def render_checkin_week(
         id_vars=["checkin_date", "Matched_Date", "Period", "Weekday"],
         value_vars=["Searches", "Views"], var_name="Metric", value_name="Volume",
     )
+    st.markdown(
+        '<div style="display:flex;gap:22px;align-items:center;margin:0 0 4px 4px;'
+        'font-size:0.86rem;color:#475569"><span><i style="display:inline-block;width:30px;'
+        'border-top:3px solid #334155;margin-right:7px;vertical-align:middle"></i>'
+        '<b>Selected week</b></span><span><i style="display:inline-block;width:30px;'
+        'border-top:3px dashed #94a3b8;margin-right:7px;vertical-align:middle"></i>'
+        '<b>Previous week</b></span></div>',
+        unsafe_allow_html=True,
+    )
     chart = (
         alt.Chart(weekly_chart)
         .mark_line(point=True, strokeWidth=2.5)
         .encode(
-            x=alt.X("Weekday:O", sort=["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"], title=None),
+            x=alt.X(
+                "Matched_Date:T",
+                title=None,
+                axis=alt.Axis(format="%-d/%-m", labelAngle=0),
+            ),
             y=alt.Y("Volume:Q", title="Observed value", axis=alt.Axis(format="~s")),
             color=alt.Color(
                 "Metric:N",
@@ -207,15 +220,13 @@ def render_checkin_week(
                     domain=["Selected week", "Previous week"],
                     range=[[1, 0], [6, 4]],
                 ),
-                legend=alt.Legend(
-                    title="Period",
-                    labelExpr=(
-                        "datum.label === 'Selected week' ? '━━ Selected week' : "
-                        "'┄┄ Previous week'"
-                    ),
-                ),
+                legend=None,
             ),
-            tooltip=["Period:N", "Metric:N", "Weekday:N", alt.Tooltip("Volume:Q", format=",.0f")],
+            tooltip=[
+                "Period:N", "Metric:N",
+                alt.Tooltip("Matched_Date:T", title="Date", format="%d/%m/%Y"),
+                alt.Tooltip("Volume:Q", format=",.0f"),
+            ],
         )
         .properties(height=320)
     )
