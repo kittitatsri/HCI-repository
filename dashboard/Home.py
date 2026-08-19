@@ -277,13 +277,26 @@ def render_checkin_week(detail: pd.DataFrame, week_start: pd.Timestamp) -> None:
                     ),
                     title=None,
                 ),
-                strokeDash=alt.StrokeDash("Period:N", title="Period"),
+                strokeDash=alt.StrokeDash(
+                    "Period:N",
+                    scale=alt.Scale(
+                        domain=["Selected week", "Previous week"],
+                        range=[[1, 0], [6, 4]],
+                    ),
+                    legend=alt.Legend(
+                        title="Period",
+                        labelExpr=(
+                            "datum.label === 'Selected week' ? '━━ Selected week' : "
+                            "'┄┄ Previous week'"
+                        ),
+                    ),
+                ),
                 tooltip=["Period:N", "Metric:N", "Weekday:N", alt.Tooltip("Volume:Q", format=",.0f")],
             )
             .properties(height=310)
         )
         st.altair_chart(chart, width="stretch")
-        st.caption("Blue = searches, green = views. Solid/dashed lines distinguish the selected and previous week.")
+        st.caption("Blue = searches · Green = views · Solid = selected week · Dotted = previous week.")
     with date_col:
         st.subheader("Strongest dates")
         strongest = (

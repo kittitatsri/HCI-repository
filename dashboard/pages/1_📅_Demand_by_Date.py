@@ -201,13 +201,26 @@ def render_checkin_week(
                 scale=alt.Scale(domain=["Searches", "Views"], range=["#2563eb", "#16a34a"]),
                 title=None,
             ),
-            strokeDash=alt.StrokeDash("Period:N", title="Period"),
+            strokeDash=alt.StrokeDash(
+                "Period:N",
+                scale=alt.Scale(
+                    domain=["Selected week", "Previous week"],
+                    range=[[1, 0], [6, 4]],
+                ),
+                legend=alt.Legend(
+                    title="Period",
+                    labelExpr=(
+                        "datum.label === 'Selected week' ? '━━ Selected week' : "
+                        "'┄┄ Previous week'"
+                    ),
+                ),
+            ),
             tooltip=["Period:N", "Metric:N", "Weekday:N", alt.Tooltip("Volume:Q", format=",.0f")],
         )
         .properties(height=320)
     )
     st.altair_chart(chart, width="stretch")
-    st.caption("Blue = searches, green = views. Solid/dashed lines distinguish the selected and previous week.")
+    st.caption("Blue = searches · Green = views · Solid = selected week · Dotted = previous week.")
 
     st.subheader(f"Hotels to check — {week_start:%d %b}–{week_end:%d %b %Y}")
     hotel_order = {"Critical surge": 5, "High increase": 4, "New interest": 3, "Stable": 2, "Declining": 1}
