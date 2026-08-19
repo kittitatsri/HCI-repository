@@ -190,6 +190,15 @@ def render_checkin_week(
         id_vars=["checkin_date", "Matched_Date", "Period", "Weekday"],
         value_vars=["Searches", "Views"], var_name="Metric", value_name="Volume",
     )
+    weekly_chart["Date Label"] = (
+        weekly_chart["Matched_Date"].dt.day.astype(str)
+        + "/"
+        + weekly_chart["Matched_Date"].dt.month.astype(str)
+    )
+    date_order = [
+        f"{day.day}/{day.month}"
+        for day in pd.date_range(week_start, week_end, freq="D")
+    ]
     st.markdown(
         '<div style="display:flex;gap:22px;align-items:center;margin:0 0 4px 4px;'
         'font-size:0.86rem;color:#475569"><span><i style="display:inline-block;width:30px;'
@@ -203,11 +212,7 @@ def render_checkin_week(
         alt.Chart(weekly_chart)
         .mark_line(point=True, strokeWidth=2.5)
         .encode(
-            x=alt.X(
-                "Matched_Date:T",
-                title=None,
-                axis=alt.Axis(format="%-d/%-m", labelAngle=0),
-            ),
+            x=alt.X("Date Label:N", sort=date_order, title=None, axis=alt.Axis(labelAngle=0)),
             y=alt.Y("Volume:Q", title="Observed value", axis=alt.Axis(format="~s")),
             color=alt.Color(
                 "Metric:N",
