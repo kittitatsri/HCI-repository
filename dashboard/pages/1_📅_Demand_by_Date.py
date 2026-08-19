@@ -599,33 +599,36 @@ with chart_col:
         )
         st.caption("Y-axis shows actual observed searches and views. Hover for exact values; KPI cards still compare uploads.")
     else:
-        st.subheader("Search and view change by check-in date")
+        st.subheader("Searches and views by check-in date")
         chart_source = filtered_daily.melt(
             id_vars="checkin_date",
-            value_vars=["Search_Change", "View_Change"],
-            var_name="Metric", value_name="Change",
+            value_vars=["Latest_Searches", "Latest_Views"],
+            var_name="Metric", value_name="Volume",
         )
         chart_source["Metric"] = chart_source["Metric"].map(
-            {"Search_Change": "Searches", "View_Change": "Views"}
+            {"Latest_Searches": "Searches", "Latest_Views": "Views"}
         )
         demand_chart = (
             alt.Chart(chart_source)
             .mark_line(point=True, strokeWidth=2.5)
         .encode(
             x=alt.X("checkin_date:T", title=None, axis=alt.Axis(format="%d %b", labelAngle=-35)),
-            y=alt.Y("Change:Q", title="Observed change", axis=alt.Axis(format="~s")),
+            y=alt.Y("Volume:Q", title="Observed value", axis=alt.Axis(format="~s")),
             color=alt.Color("Metric:N", title=None, scale=alt.Scale(
                 domain=["Searches", "Views"], range=["#2563eb", "#16a34a"]
             )),
             tooltip=[
                 alt.Tooltip("checkin_date:T", title="Check-in", format="%d %b %Y"),
                 "Metric:N",
-                alt.Tooltip("Change:Q", title="Observed change", format="+,.0f"),
+                alt.Tooltip("Volume:Q", title="Observed volume", format=",.0f"),
             ],
         )
             .properties(height=320)
         )
-        st.caption("Positive values increased; negative values decreased. Hover for exact search or view change.")
+        st.caption(
+            "Y-axis shows actual observed searches and views. Hover for exact values; "
+            "KPI cards still compare snapshot weeks."
+        )
     rule = (
         alt.Chart(pd.DataFrame({"checkin_date": [selected_ts]}))
         .mark_rule(color="#f59e0b", strokeWidth=2, strokeDash=[5, 4])
