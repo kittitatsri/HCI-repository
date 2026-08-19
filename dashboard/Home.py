@@ -368,10 +368,11 @@ def render_checkin_week(detail: pd.DataFrame, week_start: pd.Timestamp) -> None:
             "View_Change_Pct": "View Change %",
         }
     )
+    display["Product ID"] = display["ProductID"]
     display["View Change %"] = display["View Change %"] * 100
     st.dataframe(
         style_table(display[[
-            "Priority", "Hotel", "Destination", "This Week Views",
+            "Priority", "Product ID", "Hotel", "Destination", "This Week Views",
             "View Change %", "Work Priority",
         ]].head(200)),
         hide_index=True,
@@ -379,6 +380,7 @@ def render_checkin_week(detail: pd.DataFrame, week_start: pd.Timestamp) -> None:
         height=455,
         column_config={
             "Priority": st.column_config.NumberColumn(format="%d", width="small"),
+            "Product ID": st.column_config.NumberColumn(format="%d", width="small"),
             "This Week Views": st.column_config.NumberColumn(format="localized"),
             "View Change %": st.column_config.NumberColumn(format="%+.1f%%"),
         },
@@ -854,11 +856,13 @@ if not hotel_table.empty:
     hotel_table = hotel_table.rename(
         columns={"ProductName": "Hotel", "view_volume": "Observed Views"}
     )
+    hotel_table["Product ID"] = hotel_table["ProductID"]
     hotel_table["View Change %"] = hotel_table["View Change %"] * 100
     st.dataframe(
         style_table(hotel_table[
             [
                 "Priority",
+                "Product ID",
                 "Hotel",
                 "Destination",
                 "Observed Views",
@@ -872,6 +876,7 @@ if not hotel_table.empty:
         height=455,
         column_config={
             "Priority": st.column_config.NumberColumn("Priority", format="%d", width="small"),
+            "Product ID": st.column_config.NumberColumn("Product ID", format="%d", width="small"),
             "Observed Views": st.column_config.NumberColumn("Observed Views", format="localized"),
             "View Change %": st.column_config.NumberColumn("View Change %", format="%+.1f%%"),
             "Work Priority": st.column_config.TextColumn("Work Priority", width="large"),

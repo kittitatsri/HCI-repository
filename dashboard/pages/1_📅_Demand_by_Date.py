@@ -275,10 +275,11 @@ def render_checkin_week(
     display = hotels.rename(
         columns={"ProductName": "Hotel", "Current_Views": "This Week Views", "View_Change_Pct": "View Change %"}
     )
+    display["Product ID"] = display["ProductID"]
     display["View Change %"] = display["View Change %"] * 100
     st.dataframe(
         style_table(display[[
-            "Priority", "Hotel", "Destination", "This Week Views",
+            "Priority", "Product ID", "Hotel", "Destination", "This Week Views",
             "View Change %", "Work Priority",
         ]].head(200)),
         hide_index=True,
@@ -286,6 +287,7 @@ def render_checkin_week(
         height=530,
         column_config={
             "Priority": st.column_config.NumberColumn(format="%d", width="small"),
+            "Product ID": st.column_config.NumberColumn(format="%d", width="small"),
             "This Week Views": st.column_config.NumberColumn(format="localized"),
             "View Change %": st.column_config.NumberColumn(format="%+.1f%%"),
         },
@@ -729,8 +731,10 @@ display = selected.rename(
         "View Change %": "View Change %",
     }
 )
+display["Product ID"] = display["ProductID"]
 display_columns = [
     "Priority",
+    "Product ID",
     "Hotel",
     "Observed Views",
     "View Change %",
@@ -745,6 +749,7 @@ st.dataframe(
     height=530,
     column_config={
         "Priority": st.column_config.NumberColumn(format="%d", width="small"),
+        "Product ID": st.column_config.NumberColumn(format="%d", width="small"),
         "Observed Views": st.column_config.NumberColumn(format="localized"),
         "View Change %": st.column_config.NumberColumn(format="%+.1f%%"),
         "Hotel Signal": st.column_config.TextColumn(width="medium"),
