@@ -133,6 +133,8 @@ def render_checkin_week(
         filtered = filtered[filtered["Destination"].isin(destinations)]
 
     hotels, destination_week, weekday = build_checkin_week_comparison(filtered, week_start)
+    region_by_product = eligible.drop_duplicates("ProductID").set_index("ProductID")["Region"]
+    hotels["Region"] = hotels["ProductID"].map(region_by_product)
     week_end = week_start + pd.Timedelta(days=6)
     current_total = float(destination_week["Current_Searches"].sum())
     previous_total = float(destination_week["Previous_Searches"].sum())
@@ -279,7 +281,7 @@ def render_checkin_week(
     display["View Change %"] = display["View Change %"] * 100
     st.dataframe(
         style_table(display[[
-            "Priority", "Product ID", "Hotel", "Destination", "This Week Views",
+            "Priority", "Product ID", "Hotel", "Region", "Destination", "This Week Views",
             "View Change %", "Work Priority",
         ]].head(200)),
         hide_index=True,
@@ -736,6 +738,7 @@ display_columns = [
     "Priority",
     "Product ID",
     "Hotel",
+    "Region",
     "Observed Views",
     "View Change %",
     "Hotel Signal",
