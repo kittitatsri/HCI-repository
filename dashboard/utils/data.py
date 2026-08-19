@@ -34,34 +34,6 @@ def load_demand() -> pd.DataFrame:
     return frame
 
 
-@st.cache_data(show_spinner=False)
-def load_demand_history() -> pd.DataFrame:
-    """Combine the previous and latest stored demand files for complete trend charts."""
-    frames: list[pd.DataFrame] = []
-    for stem in ("demand_previous", "demand_latest"):
-        path = next(
-            (
-                ROOT / "data" / "raw" / filename
-                for filename in (f"{stem}.csv.gz", f"{stem}.csv")
-                if (ROOT / "data" / "raw" / filename).exists()
-            ),
-            None,
-        )
-        if path is not None:
-            frames.append(pd.read_csv(path))
-    if not frames:
-        return load_demand()
-    frame = pd.concat(frames, ignore_index=True).drop_duplicates().reset_index(drop=True)
-    frame["snapshot_at"] = pd.to_datetime(
-        frame["Time Stamp"].astype(str).str.replace("\u202f", " ", regex=False),
-        format="mixed",
-        errors="coerce",
-    )
-    frame["checkin_date"] = pd.to_datetime(frame["CheckInDate"], errors="coerce")
-    frame["ProductID"] = pd.to_numeric(frame["ProductID"], errors="coerce").astype("Int64")
-    return frame
-
-
 def iso_week_options(demand: pd.DataFrame) -> list[tuple[str, pd.Timestamp]]:
     """Return available ISO snapshot weeks, newest first."""
     valid = demand["snapshot_at"].dropna().dt.normalize()

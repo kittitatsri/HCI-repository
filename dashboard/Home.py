@@ -26,7 +26,6 @@ from dashboard.utils.data import (
     demand_source_path,
     iso_week_options,
     load_demand,
-    load_demand_history,
     load_engine,
     load_funnel,
 )
@@ -566,13 +565,16 @@ if destinations:
     trend_detail = trend_detail[trend_detail["Destination"].isin(destinations)]
 
 selected_daily = build_daily_market(trend_detail)
-history_trend = build_checkin_date_trend(load_demand_history())
-if destinations:
-    history_trend = history_trend[history_trend["Destination"].isin(destinations)]
-selected_daily_trend = (
-    history_trend.groupby("checkin_date", as_index=False)[["Searches", "Views"]].sum()
-    .sort_values("checkin_date")
-)
+if view_mode == "Daily":
+    history_trend = build_checkin_date_trend(load_demand())
+    if destinations:
+        history_trend = history_trend[history_trend["Destination"].isin(destinations)]
+    selected_daily_trend = (
+        history_trend.groupby("checkin_date", as_index=False)[["Searches", "Views"]].sum()
+        .sort_values("checkin_date")
+    )
+else:
+    selected_daily_trend = selected_daily
 selected_row = selected_daily[selected_daily["checkin_date"].eq(selected_ts)]
 selected_destinations = selected_detail.drop_duplicates(["Destination", "checkin_date"]).copy()
 selected_searches = float(selected_destinations["Destination_Searches"].sum())
