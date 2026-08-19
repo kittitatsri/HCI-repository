@@ -15,7 +15,12 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from dashboard.utils.data import build_hotel_checkin_trend, load_demand, load_engine, load_funnel
+from dashboard.utils.data import (
+    load_funnel,
+    load_historical_destinations,
+    load_historical_hotels,
+    load_hotel_master,
+)
 from dashboard.utils.ui import apply_theme, style_table
 
 
@@ -25,39 +30,53 @@ apply_theme()
 
 @st.cache_data(show_spinner=False)
 def prepare_hotel_data(
-    engine: pd.DataFrame, funnel: pd.DataFrame
+    master: pd.DataFrame,
+    funnel: pd.DataFrame,
+    historical_hotels: pd.DataFrame,
+    historical_destinations: pd.DataFrame,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    master_columns = [
-        "ProductID",
-        "ProductName",
-        "Destination",
-        "Region",
-        "HotelType Short",
-        "Agoda Status",
-        "Ctrip Status",
-    ]
-    master = engine[master_columns].drop_duplicates("ProductID").copy()
     master["ProductID"] = pd.to_numeric(master["ProductID"], errors="coerce").astype("Int64")
-    detail = funnel.merge(
-        master[["ProductID", "Region", "HotelType Short", "Agoda Status", "Ctrip Status"]],
-        on="ProductID",
+    history = historical_hotels.merge(
+        historical_destinations[
+            ["Destination", "checkin_date", "Total_Observed_Searches"]
+        ],
+        on=["Destination", "checkin_date"],
         how="left",
         validate="many_to_one",
     )
+    current_columns = [
+        column
+        for column in funnel.columns
+        if column not in {"ProductName", "Destination", "snapshot_at", "check_status"}
+    ]
+    detail = history.merge(
+        funnel[current_columns], on=["ProductID", "checkin_date"], how="left", validate="one_to_one"
+    ).merge(
+        master[
+            ["ProductID", "Region", "HotelType Short", "Agoda Status", "Ctrip Status"]
+        ],
+        on="ProductID", how="left", validate="many_to_one",
+    )
+    detail["snapshot_at"] = detail["Last_Observed_At"]
     detail["checkin_date"] = pd.to_datetime(detail["checkin_date"], errors="coerce").dt.normalize()
     for column in [
         "Destination_Searches",
         "Previous_Destination_Searches",
+        "Previous_Comparable_Destination_Searches",
         "Destination_Search_Change",
         "Previous_Views",
+        "Previous_Comparable_Views",
         "View_Change",
     ]:
         if column not in detail:
             detail[column] = np.nan
     for column in [
         "view_volume",
+        "Total_Observed_Views",
+        "Total_Observed_Searches",
         "Destination_Searches",
         "Previous_Destination_Searches",
+        "Previous_Comparable_Destination_Searches",
         "Destination_Search_Change",
         "Previous_Views",
         "View_Change",
@@ -111,9 +130,13 @@ def tool_card(title: str, status: str, detail: str, tone: str) -> None:
     )
 
 
-engine = load_engine()
 funnel = load_funnel()
-master, detail = prepare_hotel_data(engine, funnel)
+master = load_hotel_master()
+historical_hotels = load_historical_hotels()
+historical_destinations = load_historical_destinations()
+master, detail = prepare_hotel_data(
+    master, funnel, historical_hotels, historical_destinations
+)
 
 with st.sidebar:
     st.markdown(
@@ -205,10 +228,10 @@ if selected_rows.empty:
     st.stop()
 selected = selected_rows.iloc[0]
 
-view_median = hotel_detail["view_volume"].median()
-view_q75 = hotel_detail["view_volume"].quantile(0.75)
-view_q90 = hotel_detail["view_volume"].quantile(0.90)
-selected_views = float(selected["view_volume"])
+view_median = hotel_detail["Total_Observed_Views"].median()
+view_q75 = hotel_detail["Total_Observed_Views"].quantile(0.75)
+view_q90 = hotel_detail["Total_Observed_Views"].quantile(0.90)
+selected_views = float(selected["Total_Observed_Views"])
 demand_level = (
     "Very High"
     if selected_views >= view_q90
@@ -220,40 +243,45 @@ demand_level = (
 )
 baseline_change = selected_views / view_median - 1 if view_median else np.nan
 hotel_detail["View Change %"] = np.where(
-    hotel_detail["Previous_Views"].gt(0),
-    hotel_detail["View_Change"] / hotel_detail["Previous_Views"],
+    hotel_detail["Previous_Comparable_Views"].gt(0),
+    hotel_detail["View_Change"] / hotel_detail["Previous_Comparable_Views"],
     np.nan,
 )
 hotel_detail["Hotel Signal"] = np.select(
     [
+        hotel_detail["view_volume"].isna(),
         hotel_detail["Previous_Views"].isna() | hotel_detail["check_status"].eq("new entry"),
         hotel_detail["View Change %"].ge(0.25),
         hotel_detail["View Change %"].ge(0.10),
         hotel_detail["View Change %"].le(-0.10),
     ],
-    ["New interest", "Critical surge", "High increase", "Declining"],
+    ["No recent observation", "New interest", "Critical surge", "High increase", "Declining"],
     default="Stable",
 )
 destination_change_pct = np.where(
-    hotel_detail["Previous_Destination_Searches"].gt(0),
-    hotel_detail["Destination_Search_Change"] / hotel_detail["Previous_Destination_Searches"],
+    hotel_detail["Previous_Comparable_Destination_Searches"].gt(0),
+    hotel_detail["Destination_Search_Change"]
+    / hotel_detail["Previous_Comparable_Destination_Searches"],
     np.nan,
 )
 hotel_detail["Destination Signal"] = np.select(
     [
-        hotel_detail["Previous_Destination_Searches"].isna(),
+        hotel_detail["Destination_Searches"].isna(),
+        hotel_detail["Previous_Comparable_Destination_Searches"].isna(),
         pd.Series(destination_change_pct, index=hotel_detail.index).ge(0.25),
         pd.Series(destination_change_pct, index=hotel_detail.index).ge(0.10),
         pd.Series(destination_change_pct, index=hotel_detail.index).le(-0.10),
     ],
-    ["New demand", "Critical surge", "High increase", "Declining"],
+    ["No recent observation", "New demand", "Critical surge", "High increase", "Declining"],
     default="Stable",
 )
 selected = hotel_detail[hotel_detail["checkin_date"].eq(selected_ts)].iloc[0]
 selected_change = float(selected["View_Change"]) if pd.notna(selected["View_Change"]) else np.nan
 selected_change_pct = (
-    selected_change / float(selected["Previous_Views"])
-    if pd.notna(selected_change) and pd.notna(selected["Previous_Views"]) and selected["Previous_Views"] > 0
+    selected_change / float(selected["Previous_Comparable_Views"])
+    if pd.notna(selected_change)
+    and pd.notna(selected["Previous_Comparable_Views"])
+    and selected["Previous_Comparable_Views"] > 0
     else np.nan
 )
 upload_change_text = "No baseline" if pd.isna(selected_change) else f"{selected_change:+,.0f} hotel views"
@@ -269,8 +297,8 @@ st.caption(
 
 k1, k2, k3, k4 = st.columns(4)
 k1.metric("Destination demand", selected["Destination Signal"], help="Destination search change")
-k2.metric("Destination searches", f"{selected['Destination_Searches']:,.0f}")
-k3.metric("Hotel views", f"{selected_views:,.0f}")
+k2.metric("Total observed searches", f"{selected['Total_Observed_Searches']:,.0f}")
+k3.metric("Total observed hotel views", f"{selected_views:,.0f}")
 k4.metric(
     "Hotel view change",
     "No baseline" if pd.isna(selected_change_pct) else f"{selected_change_pct:+.1%}",
@@ -280,7 +308,14 @@ k4.metric(
 chart_col, why_col = st.columns([2.15, 1])
 with chart_col:
     st.subheader("Demand by Check-in Date")
-    chart_data = build_hotel_checkin_trend(load_demand(), product_id)
+    chart_data = hotel_detail[
+        ["checkin_date", "Total_Observed_Searches", "Total_Observed_Views"]
+    ].rename(
+        columns={
+            "Total_Observed_Searches": "Destination Searches",
+            "Total_Observed_Views": "Hotel Views",
+        }
+    )
     search_line = (
         alt.Chart(chart_data)
         .mark_line(point=True, strokeWidth=2.5, color="#2563eb")
@@ -339,7 +374,9 @@ with why_col:
         if pd.notna(baseline_change)
         else "Baseline unavailable"
     )
-    peak_date = hotel_detail.loc[hotel_detail["view_volume"].idxmax(), "checkin_date"]
+    peak_date = hotel_detail.loc[
+        hotel_detail["Total_Observed_Views"].idxmax(), "checkin_date"
+    ]
     st.markdown(
         f'<div class="fact-list"><div><b>Demand:</b> {relative_text}</div>'
         f'<div><b>Upload change:</b> {upload_change_text}</div>'
@@ -410,18 +447,18 @@ with demand_tab:
     demand_display = hotel_detail[
         [
             "checkin_date",
-            "Destination_Searches",
+            "Total_Observed_Searches",
             "Destination Signal",
-            "view_volume",
+            "Total_Observed_Views",
             "View Change %",
             "Hotel Signal",
         ]
     ].copy()
     demand_display["Hotel Interest"] = np.select(
         [
-            demand_display["view_volume"].ge(view_q90),
-            demand_display["view_volume"].ge(view_q75),
-            demand_display["view_volume"].ge(view_median),
+            demand_display["Total_Observed_Views"].ge(view_q90),
+            demand_display["Total_Observed_Views"].ge(view_q75),
+            demand_display["Total_Observed_Views"].ge(view_median),
         ],
         ["Very High", "High", "Medium"],
         default="Low",
@@ -429,8 +466,8 @@ with demand_tab:
     demand_display = demand_display.rename(
         columns={
             "checkin_date": "Check-in Date",
-            "Destination_Searches": "Destination Searches",
-            "view_volume": "Hotel Views",
+            "Total_Observed_Searches": "Destination Searches",
+            "Total_Observed_Views": "Hotel Views",
         }
     )
     demand_display["View Change %"] = demand_display["View Change %"] * 100

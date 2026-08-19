@@ -311,6 +311,35 @@ def build_latest_destination_demand(demand: pd.DataFrame) -> pd.DataFrame:
     )
 
 
+def build_stored_history_outputs(
+    demand: pd.DataFrame, previous_demand: pd.DataFrame | None
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Build deduplicated all-stored-history aggregates without loading raw files in Streamlit."""
+    frames = [demand]
+    if previous_demand is not None and not previous_demand.empty:
+        frames.insert(0, previous_demand)
+    history = pd.concat(frames, ignore_index=True, sort=False)
+    history = (
+        history.sort_values("snapshot_at", kind="stable")
+        .drop_duplicates(["snapshot_at", "checkin_date", "ProductID"], keep="last")
+    )
+    hotels = build_latest_demand_by_checkin(history).rename(
+        columns={
+            "view_volume": "Total_Observed_Views",
+            "Interval_Count": "Historical_View_Intervals",
+            "snapshot_at": "Last_Observed_At",
+        }
+    )
+    destinations = build_latest_destination_demand(history).rename(
+        columns={
+            "Destination_Searches": "Total_Observed_Searches",
+            "Destination_Intervals": "Historical_Search_Intervals",
+            "Destination_Search_Snapshot": "Last_Observed_At",
+        }
+    )
+    return hotels, destinations
+
+
 def load_booking_production() -> pd.DataFrame:
     if not BOOKING_FILE.exists():
         return pd.DataFrame(columns=["ProductID", "checkin_date", "Bookings"])
@@ -730,12 +759,24 @@ def build_engine(
     return engine
 
 
-def export_outputs(engine: pd.DataFrame, summary: pd.DataFrame, funnel: pd.DataFrame) -> None:
+def export_outputs(
+    engine: pd.DataFrame,
+    summary: pd.DataFrame,
+    funnel: pd.DataFrame,
+    historical_hotels: pd.DataFrame | None = None,
+    historical_destinations: pd.DataFrame | None = None,
+) -> None:
     PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     summary.to_csv(PROCESSED_DIR / "demand_summary.csv", index=False)
     engine.to_csv(PROCESSED_DIR / "engine.csv", index=False)
     funnel.to_csv(PROCESSED_DIR / "hotel_date_funnel.csv", index=False)
+    if historical_hotels is not None:
+        historical_hotels.to_csv(PROCESSED_DIR / "historical_hotel_date.csv", index=False)
+    if historical_destinations is not None:
+        historical_destinations.to_csv(
+            PROCESSED_DIR / "historical_destination_date.csv", index=False
+        )
     engine.head(20).to_csv(OUTPUT_DIR / "top20.csv", index=False)
     engine[engine["Action"].eq("Map Hotel to Agoda")].to_csv(OUTPUT_DIR / "agoda_mapping.csv", index=False)
     engine[engine["Action"].eq("Expand to Ctrip")].to_csv(OUTPUT_DIR / "ctrip_mapping.csv", index=False)
@@ -750,8 +791,13 @@ def run_pipeline(demand_path: Path | None = None):
         prepare_demand(pd.read_csv(previous_path)) if previous_path is not None else None
     )
     current_period, baseline_period = select_interval_periods(demand, previous_demand)
+    historical_hotels, historical_destinations = build_stored_history_outputs(
+        demand, previous_demand
+    )
     summary = build_demand_summary(current_period)
     funnel = build_hotel_date_funnel(current_period, baseline_period)
     engine = build_engine(summary, master, performance, funnel)
-    export_outputs(engine, summary, funnel)
+    export_outputs(
+        engine, summary, funnel, historical_hotels, historical_destinations
+    )
     return engine, demand, source

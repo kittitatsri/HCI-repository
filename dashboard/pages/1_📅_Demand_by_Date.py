@@ -21,6 +21,8 @@ from dashboard.utils.data import (
     load_demand,
     load_engine,
     load_funnel,
+    load_historical_destinations,
+    load_historical_hotels,
 )
 from dashboard.utils.checkin_week import build_checkin_week_comparison
 from dashboard.utils.ui import apply_theme, style_table
@@ -314,6 +316,8 @@ def render_checkin_week(
 
 engine = load_engine()
 funnel = load_funnel()
+historical_destinations = load_historical_destinations()
+historical_hotels = load_historical_hotels()
 master, detail, portfolio_daily = prepare_data(engine, funnel)
 
 with st.sidebar:
@@ -421,8 +425,21 @@ destinations = f4.multiselect("Destination", destination_options, placeholder="A
 
 eligible_ids = set(eligible_master["ProductID"].dropna().astype(int))
 filtered_detail = detail[detail["ProductID"].isin(eligible_ids)].copy()
+filtered_historical_hotels = historical_hotels[
+    historical_hotels["ProductID"].isin(eligible_ids)
+].copy()
+historical_destination_options = set(filtered_historical_hotels["Destination"].dropna().astype(str))
+filtered_historical_destinations = historical_destinations[
+    historical_destinations["Destination"].isin(historical_destination_options)
+].copy()
 if destinations:
     filtered_detail = filtered_detail[filtered_detail["Destination"].isin(destinations)]
+    filtered_historical_hotels = filtered_historical_hotels[
+        filtered_historical_hotels["Destination"].isin(destinations)
+    ]
+    filtered_historical_destinations = filtered_historical_destinations[
+        filtered_historical_destinations["Destination"].isin(destinations)
+    ]
 
 selected_ts = pd.Timestamp(selected_date)
 destination_detail = filtered_detail.drop_duplicates(["Destination", "checkin_date"]).copy()
@@ -505,6 +522,13 @@ date_level = (
 selected = filtered_detail[filtered_detail["checkin_date"].eq(selected_ts)].copy()
 selected_destinations = destination_detail[destination_detail["checkin_date"].eq(selected_ts)]
 total_searches = float(selected_destinations["Destination_Searches"].sum())
+total_observed_searches = float(
+    filtered_historical_destinations.loc[
+        filtered_historical_destinations["checkin_date"].eq(selected_ts),
+        "Total_Observed_Searches",
+    ].sum()
+)
+total_observed_searches_display = int(np.floor(total_observed_searches + 0.5))
 total_change = (
     float(selected_destinations["Destination_Search_Change"].sum(min_count=1))
     if selected_destinations["Destination_Search_Change"].notna().any()
@@ -546,7 +570,7 @@ date_signal = (
     else "Stable"
 )
 
-k1, k2, k3, k4, k5 = st.columns(5)
+k1, k2, k3, k4, k5, k6 = st.columns(6)
 k1.metric(
     "Destination demand signal",
     date_signal,
@@ -559,11 +583,16 @@ k1.metric(
     ),
 )
 k2.metric(
-    "Observed searches",
+    "Total observed searches",
+    f"{total_observed_searches_display:,}",
+    help="All deduplicated search intervals stored for this check-in date.",
+)
+k3.metric(
+    "Latest-window searches",
     f"{total_searches:,.0f}",
     help="Sum of interval search observations in the selected current window.",
 )
-k3.metric(
+k4.metric(
     "Comparable change vs previous snapshot week"
     if view_mode == "Snapshot Week"
     else "Comparable change vs previous upload",
@@ -571,19 +600,30 @@ k3.metric(
     delta=None if pd.isna(total_change) else f"{total_change:+,.0f} comparable searches",
     help=f"Latest observed searches compared with the {comparison_label}",
 )
-k4.metric("Hotels with rising views", f"{rising_hotels:,} of {active_hotels:,}")
-k5.metric("Hotels requiring action", f"{action_hotels:,}")
+k5.metric("Hotels with rising views", f"{rising_hotels:,} of {active_hotels:,}")
+k6.metric("Hotels requiring action", f"{action_hotels:,}")
 
 chart_col, destination_col = st.columns([2.05, 1])
 with chart_col:
-    st.subheader("Searches and views by check-in date")
-    chart_source = filtered_daily.melt(
-        id_vars="checkin_date",
-        value_vars=["Latest_Searches", "Latest_Views"],
-        var_name="Metric", value_name="Volume",
+    st.subheader("Total observed searches and views by check-in date")
+    historical_search_trend = filtered_historical_destinations.groupby(
+        "checkin_date", as_index=False
+    )["Total_Observed_Searches"].sum()
+    historical_view_trend = filtered_historical_hotels.groupby(
+        "checkin_date", as_index=False
+    )["Total_Observed_Views"].sum()
+    historical_trend = historical_search_trend.merge(
+        historical_view_trend, on="checkin_date", how="outer"
+    ).rename(
+        columns={
+            "Total_Observed_Searches": "Searches",
+            "Total_Observed_Views": "Views",
+        }
     )
-    chart_source["Metric"] = chart_source["Metric"].map(
-        {"Latest_Searches": "Searches", "Latest_Views": "Views"}
+    chart_source = historical_trend.melt(
+        id_vars="checkin_date",
+        value_vars=["Searches", "Views"],
+        var_name="Metric", value_name="Volume",
     )
     demand_chart = (
         alt.Chart(chart_source)
@@ -603,8 +643,8 @@ with chart_col:
         .properties(height=320)
     )
     st.caption(
-        "Observed values sum interval activity in the selected current window. "
-        "Comparison KPIs match observation coverage with the previous window."
+        "The graph uses every deduplicated interval stored in demand_previous and demand_latest. "
+        "Recent momentum remains a separate coverage-matched KPI."
     )
     rule = (
         alt.Chart(pd.DataFrame({"checkin_date": [selected_ts]}))
@@ -615,21 +655,29 @@ with chart_col:
 
 with destination_col:
     st.subheader("Demand by destination")
-    destination_rank = (
+    recent_destination_rank = (
         selected.groupby("Destination", as_index=False)
         .agg(
-            Searches=("Destination_Searches", "first"),
-            Previous_Searches=("Previous_Destination_Searches", "first"),
-            Views=("view_volume", "sum"),
-            Hotels=("ProductID", "nunique"),
+            Latest_Searches=("Destination_Searches", "first"),
+            Comparable_Change=("Destination_Search_Change", "first"),
+            Previous_Comparable=("Previous_Comparable_Destination_Searches", "first"),
         )
-        .sort_values(["Searches", "Views"], ascending=False)
-        .head(8)
     )
+    destination_rank = filtered_historical_destinations[
+        filtered_historical_destinations["checkin_date"].eq(selected_ts)
+    ][["Destination", "Total_Observed_Searches"]].merge(
+        filtered_historical_hotels[
+            filtered_historical_hotels["checkin_date"].eq(selected_ts)
+        ].groupby("Destination", as_index=False).agg(
+            Total_Hotel_Views=("Total_Observed_Views", "sum"),
+            Hotels=("ProductID", "nunique"),
+        ),
+        on="Destination", how="outer",
+    ).merge(recent_destination_rank, on="Destination", how="left")
     destination_rank["Search Change %"] = np.where(
-        destination_rank["Previous_Searches"].gt(0),
-        (destination_rank["Searches"] - destination_rank["Previous_Searches"])
-        / destination_rank["Previous_Searches"] * 100,
+        destination_rank["Previous_Comparable"].gt(0),
+        destination_rank["Comparable_Change"]
+        / destination_rank["Previous_Comparable"] * 100,
         np.nan,
     )
     destination_rank["Trend"] = np.select(
@@ -641,16 +689,28 @@ with destination_col:
         ["↑ More", "↓ Less", "→ Same"],
         default="New",
     )
-    destination_rank = destination_rank.drop(columns="Previous_Searches")
+    destination_rank = destination_rank.sort_values(
+        ["Total_Observed_Searches", "Total_Hotel_Views"], ascending=False
+    ).head(8)
     st.dataframe(
-        style_table(destination_rank[["Destination", "Searches", "Trend", "Search Change %", "Views", "Hotels"]]),
+        style_table(destination_rank[[
+            "Destination", "Total_Observed_Searches", "Latest_Searches", "Trend",
+            "Search Change %", "Total_Hotel_Views", "Hotels",
+        ]]),
         hide_index=True,
         width="stretch",
         height=354,
         column_config={
-            "Searches": st.column_config.NumberColumn(format="localized"),
+            "Total_Observed_Searches": st.column_config.NumberColumn(
+                "Total Searches", format="localized"
+            ),
+            "Latest_Searches": st.column_config.NumberColumn(
+                "Latest-window Searches", format="localized"
+            ),
             "Search Change %": st.column_config.NumberColumn(format="%+.1f%%"),
-            "Views": st.column_config.NumberColumn(format="localized"),
+            "Total_Hotel_Views": st.column_config.NumberColumn(
+                "Total Hotel Views", format="localized"
+            ),
         },
     )
 
@@ -659,11 +719,22 @@ daily_display = filtered_daily.rename(
     columns={
         "checkin_date": "Check-in Date",
         "Signal": "Destination Signal",
-        "Latest_Searches": "Observed Searches",
+        "Latest_Searches": "Latest-window Searches",
         "Change_Pct": "Change %",
         "Hotels_Rising": "Hotels with Rising Views",
         "Action_Hotels": "Action Hotels",
     }
+)
+daily_display = daily_display.merge(
+    filtered_historical_destinations.groupby("checkin_date", as_index=False)[
+        "Total_Observed_Searches"
+    ].sum().rename(
+        columns={
+            "checkin_date": "Check-in Date",
+            "Total_Observed_Searches": "Total Observed Searches",
+        }
+    ),
+    on="Check-in Date", how="left", validate="one_to_one",
 )
 daily_display["Change %"] = daily_display["Change %"] * 100
 st.dataframe(
@@ -671,7 +742,8 @@ st.dataframe(
         [
             "Check-in Date",
             "Destination Signal",
-            "Observed Searches",
+            "Total Observed Searches",
+            "Latest-window Searches",
             "Change %",
             "Hotels with Rising Views",
             "Action Hotels",
@@ -682,7 +754,8 @@ st.dataframe(
     height=320,
     column_config={
         "Check-in Date": st.column_config.DateColumn(format="DD MMM YYYY"),
-        "Observed Searches": st.column_config.NumberColumn(format="localized"),
+        "Total Observed Searches": st.column_config.NumberColumn(format="localized"),
+        "Latest-window Searches": st.column_config.NumberColumn(format="localized"),
         "Change %": st.column_config.NumberColumn(format="%+.1f%%"),
         "Hotels with Rising Views": st.column_config.NumberColumn(format="localized"),
         "Action Hotels": st.column_config.NumberColumn(format="localized"),
@@ -691,22 +764,30 @@ st.dataframe(
 
 st.subheader(f"Hotels to check — {selected_ts:%d %b %Y}")
 st.caption(
-    f"Ranked first by observed hotel views in the comparison period; signals use the {comparison_label}. "
+    f"Ranked first by total stored hotel views; recent signals use the {comparison_label}. "
     "The dashboard does not show inventory or parity results."
 )
 
-hotel_signal_order = {"Critical surge": 5, "High increase": 4, "New interest": 3, "Stable": 2, "Declining": 1}
-destination_signal_order = {"Critical surge": 5, "High increase": 4, "New demand": 3, "Stable": 2, "Declining": 1}
-selected["Hotel Signal Order"] = selected["Hotel Signal"].map(hotel_signal_order).fillna(0)
-selected["Destination Signal Order"] = selected["Destination Signal"].map(destination_signal_order).fillna(0)
-selected["Has Views"] = selected["view_volume"].gt(0)
+historical_selected = filtered_historical_hotels[
+    filtered_historical_hotels["checkin_date"].eq(selected_ts)
+].copy()
+recent_columns = selected[
+    ["ProductID", "View Change %", "View_Change", "Hotel Signal"]
+].drop_duplicates("ProductID")
+selected = historical_selected.merge(
+    recent_columns, on="ProductID", how="left", validate="one_to_one"
+).merge(
+    eligible_master[["ProductID", "Region"]].drop_duplicates("ProductID"),
+    on="ProductID", how="left", validate="one_to_one",
+)
+selected["Hotel Signal"] = selected["Hotel Signal"].fillna("No recent observation")
 selected = selected.sort_values(
-    ["Has Views", "view_volume", "Hotel Signal Order", "Destination Signal Order", "View_Change"],
-    ascending=[False, False, False, False, False],
+    ["Total_Observed_Views", "View_Change", "ProductName"],
+    ascending=[False, False, True],
 ).reset_index(drop=True)
 selected["Priority"] = np.arange(1, len(selected) + 1)
-high_views = selected["view_volume"].gt(0) & selected["view_volume"].ge(
-    selected["view_volume"].quantile(0.80)
+high_views = selected["Total_Observed_Views"].gt(0) & selected["Total_Observed_Views"].ge(
+    selected["Total_Observed_Views"].quantile(0.80)
 )
 rising_views = selected["View_Change"].gt(0)
 selected["Work Priority"] = np.select(
@@ -722,7 +803,7 @@ selected["Work Priority"] = np.select(
 display = selected.rename(
     columns={
         "ProductName": "Hotel",
-        "view_volume": "Observed Views",
+        "Total_Observed_Views": "Total Observed Views",
         "View Change %": "View Change %",
     }
 )
@@ -732,7 +813,7 @@ display_columns = [
     "Product ID",
     "Hotel",
     "Region",
-    "Observed Views",
+    "Total Observed Views",
     "View Change %",
     "Hotel Signal",
     "Work Priority",
@@ -746,7 +827,7 @@ st.dataframe(
     column_config={
         "Priority": st.column_config.NumberColumn(format="%d", width="small"),
         "Product ID": st.column_config.NumberColumn(format="%d", width="small"),
-        "Observed Views": st.column_config.NumberColumn(format="localized"),
+        "Total Observed Views": st.column_config.NumberColumn(format="localized"),
         "View Change %": st.column_config.NumberColumn(format="%+.1f%%"),
         "Hotel Signal": st.column_config.TextColumn(width="medium"),
         "Work Priority": st.column_config.TextColumn(width="large"),

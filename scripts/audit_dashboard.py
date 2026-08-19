@@ -21,6 +21,7 @@ from scripts.pipeline import (  # noqa: E402
     _with_observation_batches,
     build_latest_demand_by_checkin,
     build_latest_destination_demand,
+    build_stored_history_outputs,
     prepare_demand,
     resolve_demand_path,
     resolve_previous_demand_path,
@@ -72,6 +73,9 @@ def main() -> int:
     latest = prepare_demand(latest_raw)
     previous = prepare_demand(previous_raw)
     current, baseline = select_interval_periods(latest, previous)
+    expected_history_hotels, expected_history_destinations = build_stored_history_outputs(
+        latest, previous
+    )
 
     current_batches = _with_observation_batches(current)["Observation_Batch"].nunique()
     baseline_batches = _with_observation_batches(baseline)["Observation_Batch"].nunique()
@@ -190,6 +194,57 @@ def main() -> int:
     if hotel_mismatches:
         hard_failures.append(f"Hotel-view reconciliation mismatches: {hotel_mismatches}")
 
+    stored_history_destinations = pd.read_csv(
+        ROOT / "data" / "processed" / "historical_destination_date.csv"
+    )
+    stored_history_destinations["checkin_date"] = pd.to_datetime(
+        stored_history_destinations["checkin_date"], errors="coerce"
+    ).dt.normalize()
+    history_destination_check = expected_history_destinations[
+        ["Destination", "checkin_date", "Total_Observed_Searches"]
+    ].merge(
+        stored_history_destinations[
+            ["Destination", "checkin_date", "Total_Observed_Searches"]
+        ],
+        on=["Destination", "checkin_date"], how="outer",
+        suffixes=("_expected", "_actual"), indicator=True,
+    )
+    history_destination_mismatches = int(
+        history_destination_check["_merge"].ne("both").sum()
+        + (
+            history_destination_check["Total_Observed_Searches_expected"]
+            - history_destination_check["Total_Observed_Searches_actual"]
+        ).abs().fillna(np.inf).gt(1e-6).sum()
+    )
+    if history_destination_mismatches:
+        hard_failures.append(
+            f"Historical destination mismatches: {history_destination_mismatches}"
+        )
+    stored_history_hotels = pd.read_csv(
+        ROOT / "data" / "processed" / "historical_hotel_date.csv"
+    )
+    for frame in (expected_history_hotels, stored_history_hotels):
+        frame["ProductID"] = pd.to_numeric(frame["ProductID"], errors="coerce").astype("Int64")
+        frame["checkin_date"] = pd.to_datetime(
+            frame["checkin_date"], errors="coerce"
+        ).dt.normalize()
+    history_hotel_check = expected_history_hotels[
+        ["ProductID", "checkin_date", "Total_Observed_Views"]
+    ].merge(
+        stored_history_hotels[["ProductID", "checkin_date", "Total_Observed_Views"]],
+        on=["ProductID", "checkin_date"], how="outer",
+        suffixes=("_expected", "_actual"), indicator=True,
+    )
+    history_hotel_mismatches = int(
+        history_hotel_check["_merge"].ne("both").sum()
+        + (
+            history_hotel_check["Total_Observed_Views_expected"]
+            - history_hotel_check["Total_Observed_Views_actual"]
+        ).abs().fillna(np.inf).gt(1e-6).sum()
+    )
+    if history_hotel_mismatches:
+        hard_failures.append(f"Historical hotel mismatches: {history_hotel_mismatches}")
+
     duplicate_master_ids, conflicting_master_ids = _master_conflicts(
         pd.read_excel(ROOT / "data" / "raw" / "Master_Hotel.xlsx")
     )
@@ -207,6 +262,14 @@ def main() -> int:
     print(f"Previous raw quality: {_raw_key_quality(previous_raw)}")
     print(f"Processed destination mismatches: {destination_mismatches}")
     print(f"Processed hotel mismatches: {hotel_mismatches}")
+    print(f"Historical destination mismatches: {history_destination_mismatches}")
+    print(f"Historical hotel mismatches: {history_hotel_mismatches}")
+    audit_date = pd.Timestamp("2026-08-19")
+    audit_total = expected_history_destinations.loc[
+        expected_history_destinations["checkin_date"].eq(audit_date),
+        "Total_Observed_Searches",
+    ].sum()
+    print(f"19 Aug total observed searches across stored history: {audit_total:,.1f}")
     print(
         f"Search groups with conflicting raw values: {inconsistent_search_groups:,} "
         "(pipeline uses the median per destination interval)"

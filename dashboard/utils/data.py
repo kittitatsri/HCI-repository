@@ -440,5 +440,43 @@ def load_funnel() -> pd.DataFrame:
     return frame
 
 
+@st.cache_data(show_spinner=False)
+def load_historical_hotels() -> pd.DataFrame:
+    frame = pd.read_csv(ROOT / "data" / "processed" / "historical_hotel_date.csv")
+    frame["ProductID"] = pd.to_numeric(frame["ProductID"], errors="coerce").astype("Int64")
+    frame["checkin_date"] = pd.to_datetime(frame["checkin_date"], errors="coerce").dt.normalize()
+    frame["Last_Observed_At"] = pd.to_datetime(frame["Last_Observed_At"], errors="coerce")
+    return frame
+
+
+@st.cache_data(show_spinner=False)
+def load_historical_destinations() -> pd.DataFrame:
+    frame = pd.read_csv(ROOT / "data" / "processed" / "historical_destination_date.csv")
+    frame["checkin_date"] = pd.to_datetime(frame["checkin_date"], errors="coerce").dt.normalize()
+    frame["Last_Observed_At"] = pd.to_datetime(frame["Last_Observed_At"], errors="coerce")
+    return frame
+
+
+@st.cache_data(show_spinner=False)
+def load_hotel_master() -> pd.DataFrame:
+    master = pd.read_excel(ROOT / "data" / "raw" / "Master_Hotel.xlsx")
+    performance = pd.read_excel(ROOT / "data" / "raw" / "Hotel_Performance.xlsx")
+    master["ProductID"] = pd.to_numeric(master["ProductID"], errors="coerce").astype("Int64")
+    performance["ProductID"] = pd.to_numeric(
+        performance["ProductID"], errors="coerce"
+    ).astype("Int64")
+    master = master.sort_values("ProductID").drop_duplicates("ProductID", keep="last")
+    performance = (
+        performance.sort_values(["ProductID", "Revenue", "B2B2C RN"])
+        .drop_duplicates("ProductID", keep="last")
+    )
+    return master.merge(
+        performance[["ProductID", "Agoda Status", "Ctrip Status"]],
+        on="ProductID",
+        how="left",
+        validate="one_to_one",
+    )
+
+
 def clear_data_cache() -> None:
     st.cache_data.clear()
