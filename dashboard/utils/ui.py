@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
 import streamlit as st
 
@@ -165,3 +166,11 @@ def style_table(frame: pd.DataFrame) -> pd.io.formats.style.Styler:
     for column in [name for name in frame.columns if "Change %" in str(name)]:
         styler = styler.map(change_color, subset=[column])
     return styler
+def round_count_columns(frame: pd.DataFrame, columns: list[str]) -> pd.DataFrame:
+    """Return a display copy with non-negative count columns rounded half up."""
+    display = frame.copy()
+    for column in columns:
+        if column in display.columns:
+            values = pd.to_numeric(display[column], errors="coerce")
+            display[column] = np.floor(values + 0.5).astype("Int64")
+    return display

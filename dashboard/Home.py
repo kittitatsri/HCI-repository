@@ -32,7 +32,7 @@ from dashboard.utils.data import (
 )
 from dashboard.utils.checkin_week import build_checkin_week_comparison
 from dashboard.utils.incremental import merge_incremental_demand
-from dashboard.utils.ui import apply_theme, style_table
+from dashboard.utils.ui import apply_theme, round_count_columns, style_table
 from scripts.pipeline import RAW_DIR, REQUIRED_DEMAND_COLUMNS, run_pipeline
 
 
@@ -940,6 +940,7 @@ if not hotel_table.empty:
     )
     hotel_table["Product ID"] = hotel_table["ProductID"]
     hotel_table["View Change %"] = hotel_table["View Change %"] * 100
+    hotel_table = round_count_columns(hotel_table, ["Total Observed Views"])
     st.dataframe(
         style_table(hotel_table[
             [

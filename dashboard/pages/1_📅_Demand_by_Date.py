@@ -25,7 +25,7 @@ from dashboard.utils.data import (
     load_historical_hotels,
 )
 from dashboard.utils.checkin_week import build_checkin_week_comparison
-from dashboard.utils.ui import apply_theme, style_table
+from dashboard.utils.ui import apply_theme, round_count_columns, style_table
 
 
 st.set_page_config(page_title="HCI | Demand by Date", page_icon="📅", layout="wide")
@@ -692,11 +692,15 @@ with destination_col:
     destination_rank = destination_rank.sort_values(
         ["Total_Observed_Searches", "Total_Hotel_Views"], ascending=False
     ).head(8)
-    st.dataframe(
-        style_table(destination_rank[[
+    destination_rank_display = round_count_columns(
+        destination_rank[[
             "Destination", "Total_Observed_Searches", "Latest_Searches", "Trend",
             "Search Change %", "Total_Hotel_Views", "Hotels",
-        ]]),
+        ]],
+        ["Total_Observed_Searches", "Latest_Searches", "Total_Hotel_Views", "Hotels"],
+    )
+    st.dataframe(
+        style_table(destination_rank_display),
         hide_index=True,
         width="stretch",
         height=354,
@@ -737,6 +741,15 @@ daily_display = daily_display.merge(
     on="Check-in Date", how="left", validate="one_to_one",
 )
 daily_display["Change %"] = daily_display["Change %"] * 100
+daily_display = round_count_columns(
+    daily_display,
+    [
+        "Total Observed Searches",
+        "Latest-window Searches",
+        "Hotels with Rising Views",
+        "Action Hotels",
+    ],
+)
 st.dataframe(
     style_table(daily_display[
         [
@@ -819,6 +832,7 @@ display_columns = [
     "Work Priority",
 ]
 display["View Change %"] = display["View Change %"] * 100
+display = round_count_columns(display, ["Total Observed Views"])
 st.dataframe(
     style_table(display[display_columns].head(200)),
     hide_index=True,

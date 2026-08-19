@@ -21,7 +21,7 @@ from dashboard.utils.data import (
     load_historical_hotels,
     load_hotel_master,
 )
-from dashboard.utils.ui import apply_theme, style_table
+from dashboard.utils.ui import apply_theme, round_count_columns, style_table
 
 
 st.set_page_config(page_title="HCI | Hotel Explorer", page_icon="🏨", layout="wide")
@@ -471,6 +471,9 @@ with demand_tab:
         }
     )
     demand_display["View Change %"] = demand_display["View Change %"] * 100
+    demand_display = round_count_columns(
+        demand_display, ["Destination Searches", "Hotel Views"]
+    )
     st.dataframe(
         style_table(demand_display[
             [
