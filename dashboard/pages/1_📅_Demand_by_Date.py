@@ -192,11 +192,11 @@ def render_checkin_week(
     )
     weekly_chart["Date Label"] = (
         weekly_chart["Matched_Date"].dt.day.astype(str)
-        + "/"
-        + weekly_chart["Matched_Date"].dt.month.astype(str)
+        + " "
+        + weekly_chart["Matched_Date"].dt.strftime("%b")
     )
     date_order = [
-        f"{day.day}/{day.month}"
+        f"{day.day} {day:%b}"
         for day in pd.date_range(week_start, week_end, freq="D")
     ]
     st.markdown(
@@ -229,7 +229,7 @@ def render_checkin_week(
             ),
             tooltip=[
                 "Period:N", "Metric:N",
-                alt.Tooltip("Matched_Date:T", title="Date", format="%d/%m/%Y"),
+                alt.Tooltip("Matched_Date:T", title="Date", format="%d %b %Y"),
                 alt.Tooltip("Volume:Q", format=",.0f"),
             ],
         )
