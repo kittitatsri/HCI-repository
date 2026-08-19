@@ -296,13 +296,29 @@ st.caption(
 )
 
 k1, k2, k3, k4 = st.columns(4)
-k1.metric("Destination demand", selected["Destination Signal"], help="Destination search change")
-k2.metric("Total observed searches", f"{selected['Total_Observed_Searches']:,.0f}")
-k3.metric("Total observed hotel views", f"{selected_views:,.0f}")
+k1.metric(
+    "Destination demand",
+    selected["Destination Signal"],
+    help="Recent destination-search direction versus the previous matched observation window.",
+)
+k2.metric(
+    "Total observed searches",
+    f"{selected['Total_Observed_Searches']:,.0f}",
+    help="Destination searches summed across all stored observation intervals for this check-in date.",
+)
+k3.metric(
+    "Total observed hotel views",
+    f"{selected_views:,.0f}",
+    help="This hotel's views summed across all stored observation intervals for this check-in date.",
+)
 k4.metric(
     "Hotel view change",
     "No baseline" if pd.isna(selected_change_pct) else f"{selected_change_pct:+.1%}",
     delta=None if pd.isna(selected_change) else f"{selected_change:+,.0f} views",
+    help=(
+        "Recent momentum only: current comparable hotel views versus previous comparable hotel views "
+        "for matched observation coverage. This is separate from total observed hotel views."
+    ),
 )
 
 chart_col, why_col = st.columns([2.15, 1])
@@ -490,12 +506,36 @@ with demand_tab:
         width="stretch",
         height=330,
         column_config={
-            "Check-in Date": st.column_config.DateColumn(format="DD MMM YYYY"),
-            "Destination Searches": st.column_config.NumberColumn(format="localized"),
-            "Hotel Views": st.column_config.NumberColumn(format="localized"),
-            "View Change %": st.column_config.NumberColumn(format="%+.1f%%"),
-            "Destination Signal": st.column_config.TextColumn(width="medium"),
-            "Hotel Signal": st.column_config.TextColumn(width="medium"),
+            "Check-in Date": st.column_config.DateColumn(
+                format="DD MMM YYYY",
+                help="The future stay/check-in date being evaluated.",
+            ),
+            "Destination Searches": st.column_config.NumberColumn(
+                format="localized",
+                help="Destination searches summed across all stored observation intervals for this check-in date.",
+            ),
+            "Hotel Views": st.column_config.NumberColumn(
+                format="localized",
+                help="This hotel's views summed across all stored observation intervals for this check-in date.",
+            ),
+            "View Change %": st.column_config.NumberColumn(
+                format="%+.1f%%",
+                help=(
+                    "Recent hotel-view momentum: (current comparable views − previous comparable views) "
+                    "÷ previous comparable views. Both periods use matched observation coverage."
+                ),
+            ),
+            "Destination Signal": st.column_config.TextColumn(
+                width="medium",
+                help="Recent destination-search direction versus the previous matched observation window.",
+            ),
+            "Hotel Interest": st.column_config.TextColumn(
+                help="Relative level based on this hotel's total observed views among its available check-in dates.",
+            ),
+            "Hotel Signal": st.column_config.TextColumn(
+                width="medium",
+                help="Recent hotel-view direction derived from View Change %, not the total historical views.",
+            ),
         },
     )
 
