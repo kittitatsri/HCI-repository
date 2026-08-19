@@ -197,17 +197,23 @@ def render_checkin_week(
             x=alt.X("Weekday:O", sort=["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"], title=None),
             y=alt.Y("Volume:Q", title="Observed value", axis=alt.Axis(format="~s")),
             color=alt.Color(
-                "Metric:N",
-                scale=alt.Scale(domain=["Searches", "Views"], range=["#2563eb", "#16a34a"]),
-                title=None,
+                "Period:N",
+                scale=alt.Scale(domain=["Selected week", "Previous week"], range=["#2563eb", "#94a3b8"]),
+                title="Comparison",
             ),
-            strokeDash=alt.StrokeDash("Period:N", title="Period"),
+            strokeDash=alt.StrokeDash(
+                "Period:N",
+                scale=alt.Scale(domain=["Selected week", "Previous week"], range=[[1, 0], [6, 4]]),
+                title="Comparison",
+            ),
+            row=alt.Row("Metric:N", title=None, header=alt.Header(labelFontSize=13, labelFontWeight="bold")),
             tooltip=["Period:N", "Metric:N", "Weekday:N", alt.Tooltip("Volume:Q", format=",.0f")],
         )
-        .properties(height=320)
+        .properties(height=150)
+        .resolve_scale(y="independent")
     )
     st.altair_chart(chart, width="stretch")
-    st.caption("Blue = searches, green = views. Solid/dashed lines distinguish the selected and previous week.")
+    st.caption("Blue solid = selected week · Grey dashed = previous week. Searches and views use separate actual-value scales.")
 
     st.subheader(f"Hotels to check — {week_start:%d %b}–{week_end:%d %b %Y}")
     hotel_order = {"Critical surge": 5, "High increase": 4, "New interest": 3, "Stable": 2, "Declining": 1}
