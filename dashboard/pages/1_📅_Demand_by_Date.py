@@ -20,6 +20,7 @@ from dashboard.utils.data import (
     build_weekly_comparison,
     iso_week_options,
     load_demand,
+    load_demand_history,
     load_engine,
     load_funnel,
 )
@@ -567,7 +568,7 @@ chart_col, destination_col = st.columns([2.05, 1])
 with chart_col:
     if view_mode == "Daily":
         st.subheader("Demand trend by check-in date")
-        full_trend = build_checkin_date_trend(load_demand())
+        full_trend = build_checkin_date_trend(load_demand_history())
         allowed_destinations = set(destination_options)
         full_trend = full_trend[full_trend["Destination"].isin(allowed_destinations)]
         if destinations:
