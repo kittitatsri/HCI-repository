@@ -979,7 +979,7 @@ if not hotel_table.empty:
             "Priority": st.column_config.NumberColumn("Priority", format="%d", width="small", help="Operational rank for the selected check-in date."),
             "Product ID": st.column_config.NumberColumn("Product ID", format="%d", width="small", help="Unique hotel identifier."),
             "Total Observed Views": st.column_config.NumberColumn(
-                "Total Observed Views", format="localized", help="Hotel views summed across all stored observation intervals for this check-in date."
+                "Total Observed Views", format="localized", help="Total views across all stored history."
             ),
             "View Change %": st.column_config.NumberColumn("View Change %", format="%+.1f%%", help="Recent current-versus-previous hotel-view change using matched observation coverage."),
             "Why prioritized": st.column_config.TextColumn(help="Evidence explaining why this hotel received its rank."),

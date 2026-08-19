@@ -309,7 +309,7 @@ k2.metric(
 k3.metric(
     "Total observed hotel views",
     f"{selected_views:,.0f}",
-    help="This hotel's views summed across all stored observation intervals for this check-in date.",
+    help="Total views across all stored history.",
 )
 k4.metric(
     "Hotel view change",
@@ -516,7 +516,7 @@ with demand_tab:
             ),
             "Hotel Views": st.column_config.NumberColumn(
                 format="localized",
-                help="This hotel's views summed across all stored observation intervals for this check-in date.",
+                help="Total views across all stored history.",
             ),
             "View Change %": st.column_config.NumberColumn(
                 format="%+.1f%%",

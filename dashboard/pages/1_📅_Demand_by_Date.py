@@ -859,7 +859,7 @@ st.dataframe(
     column_config={
         "Priority": st.column_config.NumberColumn(format="%d", width="small", help="Operational rank for the selected check-in date."),
         "Product ID": st.column_config.NumberColumn(format="%d", width="small", help="Unique hotel identifier."),
-        "Total Observed Views": st.column_config.NumberColumn(format="localized", help="Hotel views summed across all stored observation intervals for this check-in date."),
+        "Total Observed Views": st.column_config.NumberColumn(format="localized", help="Total views across all stored history."),
         "View Change %": st.column_config.NumberColumn(format="%+.1f%%", help="Recent current-versus-previous hotel-view change using matched observation coverage."),
         "Hotel Signal": st.column_config.TextColumn(width="medium", help="Recent hotel-view direction, separate from total historical views."),
         "Work Priority": st.column_config.TextColumn(width="large", help="Urgency tier based primarily on total views and recent view direction."),
