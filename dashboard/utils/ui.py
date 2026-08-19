@@ -143,6 +143,20 @@ def style_table(frame: pd.DataFrame) -> pd.io.formats.style.Styler:
             return "background-color:#f1f5f9;color:#64748b;font-weight:650"
         return "background-color:#dcfce7;color:#15803d;font-weight:650"
 
+    def interest_color(value: object) -> str:
+        if pd.isna(value):
+            return ""
+        colors = {
+            "very high": ("#fee2e2", "#b91c1c"),
+            "high": ("#ffedd5", "#c2410c"),
+            "medium": ("#fef9c3", "#854d0e"),
+            "low": ("#dcfce7", "#15803d"),
+        }.get(str(value).strip().lower())
+        if colors is None:
+            return ""
+        background, foreground = colors
+        return f"background-color:{background};color:{foreground};font-weight:650"
+
     styler = frame.style
     semantic_columns = [
         column
@@ -163,6 +177,8 @@ def style_table(frame: pd.DataFrame) -> pd.io.formats.style.Styler:
     ]
     if semantic_columns:
         styler = styler.map(semantic_color, subset=semantic_columns)
+    if "Hotel Interest" in frame.columns:
+        styler = styler.map(interest_color, subset=["Hotel Interest"])
     for column in [name for name in frame.columns if "Change %" in str(name)]:
         styler = styler.map(change_color, subset=[column])
     return styler
