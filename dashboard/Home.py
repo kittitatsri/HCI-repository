@@ -267,9 +267,9 @@ def render_checkin_week(detail: pd.DataFrame, week_start: pd.Timestamp) -> None:
         st.markdown(
             '<div style="display:flex;gap:22px;align-items:center;margin:0 0 4px 4px;'
             'font-size:0.86rem;color:#475569"><span><i style="display:inline-block;width:30px;'
-            'border-top:3px solid #334155;margin-right:7px;vertical-align:middle"></i>'
+            'border-top:3px solid #2563eb;margin-right:7px;vertical-align:middle"></i>'
             '<b>Selected week</b></span><span><i style="display:inline-block;width:30px;'
-            'border-top:3px dashed #94a3b8;margin-right:7px;vertical-align:middle"></i>'
+            'border-top:3px dashed #93c5fd;margin-right:7px;vertical-align:middle"></i>'
             '<b>Previous week</b></span></div>',
             unsafe_allow_html=True,
         )
