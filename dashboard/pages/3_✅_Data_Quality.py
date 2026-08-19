@@ -146,13 +146,26 @@ else:
     )
 
 k1, k2, k3, k4 = st.columns(4)
-k1.metric("Demand Records", f"{profile['raw_rows']:,}")
-k2.metric("Hotels", f"{profile['raw_hotels']:,}")
+k1.metric(
+    "Demand Records",
+    f"{profile['raw_rows']:,}",
+    help="Number of raw demand rows in the current canonical demand-history file.",
+)
+k2.metric(
+    "Hotels",
+    f"{profile['raw_hotels']:,}",
+    help="Distinct non-null Product IDs present in the current demand data.",
+)
 k3.metric(
     "Check-in Coverage",
     f"{profile['raw_checkin_min']:%d %b}–{profile['raw_checkin_max']:%d %b}",
+    help="Earliest and latest check-in dates represented in the current demand data.",
 )
-k4.metric("Latest Snapshot", f"{profile['latest_snapshot']:%d %b, %H:%M}")
+k4.metric(
+    "Latest Snapshot",
+    f"{profile['latest_snapshot']:%d %b, %H:%M}",
+    help="Most recent valid observation timestamp found in the demand data, not the GitHub upload time.",
+)
 
 checks = pd.DataFrame(
     [
@@ -232,10 +245,10 @@ with left:
         width="stretch",
         height=390,
         column_config={
-            "Check": st.column_config.TextColumn(width="medium"),
-            "Status": st.column_config.TextColumn(width="small"),
-            "Finding": st.column_config.TextColumn(width="large"),
-            "Action": st.column_config.TextColumn(width="large"),
+            "Check": st.column_config.TextColumn(width="medium", help="Data rule being tested."),
+            "Status": st.column_config.TextColumn(width="small", help="Passed, warning, or failed result."),
+            "Finding": st.column_config.TextColumn(width="large", help="What HCI found in the current source or processed data."),
+            "Action": st.column_config.TextColumn(width="large", help="Recommended response when the check is not clean."),
         },
     )
 

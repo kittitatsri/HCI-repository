@@ -261,8 +261,16 @@ def render_checkin_week(detail: pd.DataFrame, week_start: pd.Timestamp) -> None:
         delta=None if pd.isna(change) else f"{change:+,.0f} {'searches/day' if not complete else 'searches'}",
         help=definition,
     )
-    k4.metric("Hotels with higher weekly views", f"{rising_hotels:,} of {len(hotels):,}")
-    k5.metric("Hotels requiring action", f"{int(hotels['Action'].sum()):,}")
+    k4.metric(
+        "Hotels with higher weekly views",
+        f"{rising_hotels:,} of {len(hotels):,}",
+        help="Hotels whose views are higher for the selected check-in week than for the previous check-in week.",
+    )
+    k5.metric(
+        "Hotels requiring action",
+        f"{int(hotels['Action'].sum()):,}",
+        help="Hotels combining strong destination demand with rising or relatively high hotel views.",
+    )
 
     chart_col, date_col = st.columns([2.15, 1])
     with chart_col:
@@ -386,10 +394,11 @@ def render_checkin_week(detail: pd.DataFrame, week_start: pd.Timestamp) -> None:
         width="stretch",
         height=455,
         column_config={
-            "Priority": st.column_config.NumberColumn(format="%d", width="small"),
-            "Product ID": st.column_config.NumberColumn(format="%d", width="small"),
-            "This Week Views": st.column_config.NumberColumn(format="localized"),
-            "View Change %": st.column_config.NumberColumn(format="%+.1f%%"),
+            "Priority": st.column_config.NumberColumn(format="%d", width="small", help="Operational rank for the selected check-in week."),
+            "Product ID": st.column_config.NumberColumn(format="%d", width="small", help="Unique hotel identifier."),
+            "This Week Views": st.column_config.NumberColumn(format="localized", help="Hotel views observed for check-in dates in the selected week."),
+            "View Change %": st.column_config.NumberColumn(format="%+.1f%%", help="View change from the previous check-in week to the selected check-in week."),
+            "Work Priority": st.column_config.TextColumn(help="Urgency tier based on weekly hotel views and their direction."),
         },
     )
 
@@ -702,8 +711,16 @@ k4.metric(
         else "Compares the selected check-in date between the latest and previous demand uploads."
     ),
 )
-k5.metric("Hotels with rising views", f"{rising_hotels:,} of {active_hotels:,}")
-k6.metric("Hotels requiring action", f"{action_hotels:,}")
+k5.metric(
+    "Hotels with rising views",
+    f"{rising_hotels:,} of {active_hotels:,}",
+    help="Hotels with positive recent comparable view change among hotels observed in both matched periods.",
+)
+k6.metric(
+    "Hotels requiring action",
+    f"{action_hotels:,}",
+    help="Prioritized hotels where demand and hotel-view evidence indicate an inventory and parity check.",
+)
 
 
 st.subheader("Total observed searches and views by check-in date")
@@ -959,13 +976,14 @@ if not hotel_table.empty:
         width="stretch",
         height=455,
         column_config={
-            "Priority": st.column_config.NumberColumn("Priority", format="%d", width="small"),
-            "Product ID": st.column_config.NumberColumn("Product ID", format="%d", width="small"),
+            "Priority": st.column_config.NumberColumn("Priority", format="%d", width="small", help="Operational rank for the selected check-in date."),
+            "Product ID": st.column_config.NumberColumn("Product ID", format="%d", width="small", help="Unique hotel identifier."),
             "Total Observed Views": st.column_config.NumberColumn(
-                "Total Observed Views", format="localized"
+                "Total Observed Views", format="localized", help="Hotel views summed across all stored observation intervals for this check-in date."
             ),
-            "View Change %": st.column_config.NumberColumn("View Change %", format="%+.1f%%"),
-            "Work Priority": st.column_config.TextColumn("Work Priority", width="large"),
+            "View Change %": st.column_config.NumberColumn("View Change %", format="%+.1f%%", help="Recent current-versus-previous hotel-view change using matched observation coverage."),
+            "Why prioritized": st.column_config.TextColumn(help="Evidence explaining why this hotel received its rank."),
+            "Work Priority": st.column_config.TextColumn("Work Priority", width="large", help="Urgency tier based primarily on total views and recent view direction."),
         },
     )
 else:
