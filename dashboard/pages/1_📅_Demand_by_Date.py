@@ -15,7 +15,6 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from dashboard.utils.data import (
-    build_checkin_date_trend,
     build_full_history_funnel,
     build_weekly_comparison,
     iso_week_options,
@@ -565,52 +564,18 @@ k5.metric("Hotels requiring action", f"{action_hotels:,}")
 
 chart_col, destination_col = st.columns([2.05, 1])
 with chart_col:
-    if view_mode == "Daily":
-        st.subheader("Demand trend by check-in date")
-        full_trend = build_checkin_date_trend(load_demand())
-        allowed_destinations = set(destination_options)
-        full_trend = full_trend[full_trend["Destination"].isin(allowed_destinations)]
-        if destinations:
-            full_trend = full_trend[full_trend["Destination"].isin(destinations)]
-        chart_source = (
-            full_trend.groupby("checkin_date", as_index=False)[["Searches", "Views"]].sum()
-            .sort_values("checkin_date")
-        )
-        chart_source = chart_source.melt(
-            id_vars="checkin_date", value_vars=["Searches", "Views"],
-            var_name="Metric", value_name="Volume",
-        )
-        demand_chart = (
-            alt.Chart(chart_source)
-            .mark_line(point=True, strokeWidth=2.5)
-            .encode(
-                x=alt.X("checkin_date:T", title=None, axis=alt.Axis(format="%d %b", labelAngle=-35)),
-                y=alt.Y("Volume:Q", title="Observed value", axis=alt.Axis(format="~s")),
-                color=alt.Color("Metric:N", title=None, scale=alt.Scale(
-                    domain=["Searches", "Views"], range=["#2563eb", "#16a34a"]
-                )),
-                tooltip=[
-                    alt.Tooltip("checkin_date:T", title="Check-in", format="%d %b %Y"),
-                    "Metric:N",
-                    alt.Tooltip("Volume:Q", title="Observed volume", format=",.0f"),
-                ],
-            )
-            .properties(height=320)
-        )
-        st.caption("Y-axis shows actual observed searches and views. Hover for exact values; KPI cards still compare uploads.")
-    else:
-        st.subheader("Searches and views by check-in date")
-        chart_source = filtered_daily.melt(
-            id_vars="checkin_date",
-            value_vars=["Latest_Searches", "Latest_Views"],
-            var_name="Metric", value_name="Volume",
-        )
-        chart_source["Metric"] = chart_source["Metric"].map(
-            {"Latest_Searches": "Searches", "Latest_Views": "Views"}
-        )
-        demand_chart = (
-            alt.Chart(chart_source)
-            .mark_line(point=True, strokeWidth=2.5)
+    st.subheader("Searches and views by check-in date")
+    chart_source = filtered_daily.melt(
+        id_vars="checkin_date",
+        value_vars=["Latest_Searches", "Latest_Views"],
+        var_name="Metric", value_name="Volume",
+    )
+    chart_source["Metric"] = chart_source["Metric"].map(
+        {"Latest_Searches": "Searches", "Latest_Views": "Views"}
+    )
+    demand_chart = (
+        alt.Chart(chart_source)
+        .mark_line(point=True, strokeWidth=2.5)
         .encode(
             x=alt.X("checkin_date:T", title=None, axis=alt.Axis(format="%d %b", labelAngle=-35)),
             y=alt.Y("Volume:Q", title="Observed value", axis=alt.Axis(format="~s")),
@@ -623,12 +588,12 @@ with chart_col:
                 alt.Tooltip("Volume:Q", title="Observed volume", format=",.0f"),
             ],
         )
-            .properties(height=320)
-        )
-        st.caption(
-            "Y-axis shows actual observed searches and views. Hover for exact values; "
-            "KPI cards still compare snapshot weeks."
-        )
+        .properties(height=320)
+    )
+    st.caption(
+        "The graph and KPI cards use the same filtered demand state. Hover for exact values; "
+        "comparison KPIs still use the previous period."
+    )
     rule = (
         alt.Chart(pd.DataFrame({"checkin_date": [selected_ts]}))
         .mark_rule(color="#f59e0b", strokeWidth=2, strokeDash=[5, 4])
